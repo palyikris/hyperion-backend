@@ -41,7 +41,7 @@ app.add_middleware(
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(system.router, prefix="/api", tags=["System"])
 
-# # Protected Routes (will require JWT)
+# protected Routes
 # app.include_router(media.router, prefix="/media", tags=["Media Operations"])
 # app.include_router(stats.router, prefix="/stats", tags=["Statistics"])
 

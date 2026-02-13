@@ -51,7 +51,7 @@ async def signup(user_data: UserModel, db: AsyncSession = Depends(get_db)):
     status_code=status.HTTP_200_OK,
 )
 # Depends(get_db) injects a database session into the route handler, allowing me to interact with the database asynchronously.
-async def login(response: Response, user_data: UserModelForLogin, db: AsyncSession = Depends(get_db)):
+async def login(user_data: UserModelForLogin, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).where(User.email == user_data.email))
 
     # kinda like first() but async and returns None if not found
@@ -64,21 +64,22 @@ async def login(response: Response, user_data: UserModelForLogin, db: AsyncSessi
 
     token = security.create_access_token(data={"sub": user.email})
 
-    # Set the cookie
+    response = JSONResponse(
+        content={"message": "Login successful"},
+        status_code=status.HTTP_200_OK,
+    )
+
     response.set_cookie(
         key="access_token",
         value=token,
-        httponly=True,  # prevents JS from reading the cookie (No XSS!)
+        httponly=True,
         max_age=3600,  # 60 minutes
         expires=3600,
         samesite="lax",  # CSRF protection
         secure=False,  # set to True in production (HTTPS)
-        path="/", # cookie is valid for the entire site
+        path="/",  # cookie is valid for the entire site
     )
-    return JSONResponse(
-        content={"message": "Login successful"},
-        status_code=status.HTTP_200_OK,
-    )
+    return response
 
 
 @router.get(
@@ -93,13 +94,14 @@ async def read_users_me(current_user: User = Depends(get_current_user)):
 
 
 @router.post(
-    "/logout", 
+    "/logout",
     response_model=MessageResponse,
-    status_code=status.HTTP_200_OK
+    status_code=status.HTTP_200_OK,
 )
-async def logout(response: Response):
-    response.delete_cookie("access_token")
-    return JSONResponse(
-        content={"message": "Logout successful"}, 
-        status_code=status.HTTP_200_OK
+async def logout():
+    response = JSONResponse(
+        content={"message": "Logout successful"},
+        status_code=status.HTTP_200_OK,
     )
+    response.delete_cookie("access_token")
+    return response
