@@ -2,10 +2,10 @@ from typing import Optional
 from pydantic import BaseModel
 
 class UserModel(BaseModel):
-  email: str 
-  password: str
-  full_name: Optional[str] = None
-  
+    email: str
+    password: str
+    full_name: Optional[str] = None
+
 class UserModelForLogin(BaseModel):
   email: str 
   password: str
@@ -16,9 +16,15 @@ class SignupResponse(BaseModel):
 
 
 class MessageResponse(BaseModel):
-  message: str
-  
+    message: str
+
 class MeResponse(BaseModel): 
-  id: str 
-  email: str 
-  full_name: str
+    id: str
+    email: str
+    full_name: str
+    language: str
+
+
+class PutMeUserModel(BaseModel):
+    full_name: Optional[str] = None
+    language: Optional[str] = None

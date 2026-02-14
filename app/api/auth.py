@@ -10,7 +10,8 @@ from app.models.auth.auth import (
     UserModelForLogin,
     SignupResponse,
     MessageResponse,
-    MeResponse
+    MeResponse,
+    PutMeUserModel,
 )
 from fastapi import Response
 from app.api.deps import get_current_user
@@ -89,7 +90,13 @@ async def login(user_data: UserModelForLogin, db: AsyncSession = Depends(get_db)
 )
 async def read_users_me(current_user: User = Depends(get_current_user)):
     return JSONResponse(
-        content={"id": current_user.id, "email": current_user.email, "full_name": current_user.full_name }, status_code=status.HTTP_200_OK
+        content={
+            "id": current_user.id,
+            "email": current_user.email,
+            "full_name": current_user.full_name,
+            "language": current_user.language,
+        },
+        status_code=status.HTTP_200_OK,
     )
 
 
@@ -105,3 +112,31 @@ async def logout():
     )
     response.delete_cookie("access_token")
     return response
+
+
+@router.put(
+    "/me",
+    response_model=MeResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def update_user(
+    user_data: PutMeUserModel,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    current_user.full_name = user_data.full_name or current_user.full_name
+    current_user.language = user_data.language or current_user.language
+
+    db.add(current_user)
+    await db.commit()
+    await db.refresh(current_user)
+
+    return JSONResponse(
+        content={
+            "id": current_user.id,
+            "email": current_user.email,
+            "full_name": current_user.full_name,
+            "language": current_user.language,
+        },
+        status_code=status.HTTP_200_OK,
+    )
