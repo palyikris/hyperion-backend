@@ -15,4 +15,7 @@ jobs:
       - name: Push to hub
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        run: git push --force https://palyikris:$HF_TOKEN@huggingface.co/spaces/palyikris/hyperion-backend main
+        run: |
+          # use HEAD:refs/heads/main to ensure it works 
+          # even if the local branch name differs or isn't fully initialized
+          git push --force https://palyikris:$HF_TOKEN@huggingface.co/spaces/palyikris/hyperion-backend HEAD:refs/heads/main
