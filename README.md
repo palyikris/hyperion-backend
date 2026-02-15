@@ -87,7 +87,7 @@ docker run --rm -p 7860:7860 --env-file .env hyperion-backend
 - `GET /api/health` -> health check (503 if database is down)
 - `POST /api/auth/signup` -> create user
 - `POST /api/auth/login` -> login, sets `access_token` cookie
-- `POST /api/auth/logout` -> clears cookie
+- `POST /api/auth/logout` -> clears cookies
 
 ### Authenticated (cookie-based)
 
