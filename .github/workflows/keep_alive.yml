@@ -1,0 +1,14 @@
+name: Keep Hyperion Awake
+on:
+  schedule:
+    # runs every 50 minutes (Hugging Face sleeps after 48 hours)
+    - cron: '*/50 * * * *'
+  workflow_dispatch: # allows triggering it manually for testing
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping FastAPI Endpoint
+        run: |
+          curl -I https://palyikris-hyperion-backend.hf.space/docs
