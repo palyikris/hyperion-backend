@@ -9,6 +9,7 @@ from app.models.db.User import User
 
 async def get_current_user(request: Request, db: AsyncSession = Depends(get_db)):
     token = request.cookies.get("access_token")
+    print("Token from cookie:", token)  # Debugging line to check the token value
     if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated"

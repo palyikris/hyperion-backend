@@ -76,8 +76,8 @@ async def login(user_data: UserModelForLogin, db: AsyncSession = Depends(get_db)
         httponly=True,
         max_age=3600,  # 60 minutes
         expires=3600,
-        samesite="lax",  # CSRF protection
-        secure=False,  # set to True in production (HTTPS)
+        samesite="none",  # CSRF protection
+        secure=True,  # set to True in production (HTTPS)
         path="/",  # cookie is valid for the entire site
     )
     return response
