@@ -56,7 +56,6 @@ async def get_system_health(current_user=Depends(get_current_user)):
     current_pressure = max(cpu_load, ram_usage_pct)
     load_history.append(round(current_pressure))
 
-    # 4. Update the history with the HIGHER of the two for the 'Pressure' sparkline
     system_status = "STABILIZED"
     if current_pressure > 80:
         system_status = "HEAVY_LOAD"
