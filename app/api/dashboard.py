@@ -21,7 +21,6 @@ import psutil
 from collections import deque
 from fastapi import APIRouter, Depends, status
 from fastapi.responses import JSONResponse
-import os
 
 START_TIME = time.time()
 # initialize with some zeros so the chart doesn't look broken on first load
@@ -44,22 +43,21 @@ async def get_system_health(current_user=Depends(get_current_user)):
     """
     Returns real-time hardware metrics for the Hyperion environment.
     """
-    process = psutil.Process(os.getpid())
+    cpu_load = psutil.cpu_percent(interval=0.1)
 
-    cpu_load = process.cpu_percent(interval=0.1)
+    ram_load = psutil.virtual_memory().percent
 
-    mem_info = process.memory_info()
-    mem_mb = mem_info.rss / (1024 * 1024)
-    limit_mb = 16384  # Adjust based on your HF plan (16GB is standard)
-    ram_usage_pct = (mem_mb / limit_mb) * 100
+    combined_pressure = max(cpu_load, ram_load)
 
-    current_pressure = max(cpu_load, ram_usage_pct)
-    load_history.append(round(current_pressure))
+    load_history.append(round(combined_pressure))
 
-    system_status = "STABILIZED"
-    if current_pressure > 80:
+    if combined_pressure > 95:
+        system_status = "STRESSED"
+    elif combined_pressure > 80:
         system_status = "HEAVY_LOAD"
-    elif current_pressure > 30:
+    elif combined_pressure < 30:
+        system_status = "STABILIZED"
+    else:
         system_status = "ACTIVE"
 
     return JSONResponse(
