@@ -8,6 +8,8 @@ from app.core.security import SECRET_KEY, ALGORITHM
 from app.models.db.User import User
 
 import time
+from datetime import datetime, timezone
+
 from collections import deque
 from fastapi import Request
 from jose import JWTError, jwt
@@ -80,7 +82,10 @@ async def user_experience(current_user=Depends(get_current_user)):
         content={
             "active_now": len(active_users),
             "active_trend": list(active_trend_history),
-            "avg_response_time": sum(response_times) / len(response_times) if response_times else 0,
+            "avg_response_time": (
+                sum(response_times) / len(response_times) if response_times else 0
+            ),
             "daily_activity": list(daily_history),
+            "last_updated": datetime.now(timezone.utc).isoformat(),
         }
     )

@@ -7,3 +7,4 @@ class UXResponse(BaseModel):
     active_trend: list
     avg_response_time: float
     daily_activity: list
+    last_updated: str
