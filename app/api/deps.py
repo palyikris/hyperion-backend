@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from sqlalchemy import select
 from app.models.db.User import User
+from app.models.db.TokenBlacklist import TokenBlacklist
 
 
 async def get_current_user(request: Request, db: AsyncSession = Depends(get_db)):
@@ -22,6 +23,13 @@ async def get_current_user(request: Request, db: AsyncSession = Depends(get_db))
             raise HTTPException(status_code=401, detail="Invalid token")
     except JWTError:
         raise HTTPException(status_code=401, detail="Token expired or invalid")
+
+    # Check if token is blacklisted
+    blacklist_result = await db.execute(
+        select(TokenBlacklist).where(TokenBlacklist.token == token)
+    )
+    if blacklist_result.scalar_one_or_none():
+        raise HTTPException(status_code=401, detail="Token has been revoked")
 
     result = await db.execute(select(User).where(User.email == email))
     user = result.scalar_one_or_none()

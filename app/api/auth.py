@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.database import get_db
 from app.core import security
 from app.models.db.User import User
+from app.models.db.TokenBlacklist import TokenBlacklist
 from app.models.auth.auth import (
     UserModel,
     UserModelForLogin,
@@ -15,6 +16,8 @@ from app.models.auth.auth import (
 )
 from fastapi import Response
 from app.api.deps import get_current_user
+from datetime import datetime, timedelta, timezone
+from jose import jwt
 
 router = APIRouter()
 
@@ -105,7 +108,37 @@ async def read_users_me(current_user: User = Depends(get_current_user)):
     response_model=MessageResponse,
     status_code=status.HTTP_200_OK,
 )
-async def logout():
+async def logout(request: Request, db: AsyncSession = Depends(get_db)):
+    token = request.cookies.get("access_token")
+
+    if token:
+        try:
+            # Decode token to get expiration time
+            payload = jwt.decode(
+                token, security.SECRET_KEY or "", algorithms=[security.ALGORITHM]
+            )
+            email = payload.get("sub", "unknown")
+            exp = payload.get("exp")
+
+            # Convert exp timestamp to datetime
+            expires_at = (
+                datetime.fromtimestamp(exp, tz=timezone.utc)
+                if exp
+                else datetime.now(timezone.utc) + timedelta(hours=1)
+            )
+
+            # Add token to blacklist
+            blacklisted_token = TokenBlacklist(
+                token=token,
+                user_email=email,
+                expires_at=expires_at,
+            )
+            db.add(blacklisted_token)
+            await db.commit()
+        except Exception as e:
+            print(f"Error blacklisting token: {e}")
+            # Still proceed with logout even if blacklist fails
+
     response = JSONResponse(
         content={"message": "Logout successful"},
         status_code=status.HTTP_200_OK,

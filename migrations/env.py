@@ -31,6 +31,9 @@ if database_url:
 # from myapp import mymodel
 # target_metadata = mymodel.Base.metadata
 from app.database import Base
+from app.models.db.TokenBlacklist import (
+    TokenBlacklist,
+)  # This import is CRITICAL so Base knows about the table
 from app.models.db.User import (
     User,
 )  # This import is CRITICAL so Base knows about the table
