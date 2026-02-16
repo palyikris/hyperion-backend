@@ -30,15 +30,16 @@ load_history = deque([0, 0, 0, 0, 0, 0, 0], maxlen=7)
 def get_formatted_uptime():
     """Calculates how long the API has been active."""
     uptime_seconds = time.time() - START_TIME
-    # You can return a percentage based on an SLA (e.g., 99.9)
-    # or the actual hours/days. For your UI gauge, 99.9 is likely a "Health" score.
-    return f"{uptime_seconds:.0f} seconds"  # or return a percentage if you prefer
+    health_score = min(
+        99.9, (uptime_seconds / 86400) * 99.9
+    )  # cap at 99.9% based on days active
+    return round(health_score, 1)
 
 
 @router.get(
     "/system-health",
     status_code=status.HTTP_200_OK,
-    # response_model=SystemHealthResponse, # Ensure your Pydantic model matches the dict below
+    response_model=SystemHealthResponse,
 )
 async def get_system_health(current_user=Depends(get_current_user)):
     """
@@ -47,10 +48,9 @@ async def get_system_health(current_user=Depends(get_current_user)):
     cpu_load = psutil.cpu_percent(interval=None)
     ram_load = psutil.virtual_memory().percent
 
-    current_combined_load = int((cpu_load + ram_load) / 2)
-    load_history.append(current_combined_load)
+    load_history.append(round(cpu_load))
+    load_history.append(round(ram_load))
 
-    # Simple logic: If CPU or RAM is pinned at 100%, status might be 'STRESSED'
     system_status = "ACTIVE"
     if cpu_load > 99 or ram_load > 99:
         system_status = "STRESSED"
