@@ -3,10 +3,16 @@ from fastapi.responses import JSONResponse
 
 from app.api.deps import get_current_user
 from app.models.dashboard.ux import UXResponse
+from app.database import AsyncSessionLocal
+from app.core.security import SECRET_KEY, ALGORITHM
+from app.models.db.User import User
 
 import time
 from collections import deque
 from fastapi import Request
+from jose import JWTError, jwt
+from sqlalchemy import select
+from typing import Optional
 
 router = APIRouter()
 
@@ -17,8 +23,8 @@ active_trend_history = deque([0, 0, 0, 0, 0, 0, 0], maxlen=7)
 daily_history = [0, 0, 0, 0, 0, 0, 0]
 
 
-def update_active_users(ip: str):
-    active_users[ip] = time.time()
+def update_active_users(user_id: str):
+    active_users[user_id] = time.time()
     # cleanup users who havent made a request in 5 minutes
     current_time = time.time()
     expired = [
@@ -28,20 +34,30 @@ def update_active_users(ip: str):
         del active_users[ip]
 
 
-def get_client_ip(request: Request):
-    x_forwarded_for = request.headers.get("X-Forwarded-For")
-    if x_forwarded_for:
-        return x_forwarded_for.split(",")[0]
-    if request.client:
-        return request.client.host
-    return "unknown"
+async def get_user_id_from_request(request: Request) -> Optional[str]:
+    token = request.cookies.get("access_token")
+    if not token:
+        return None
+
+    try:
+        payload = jwt.decode(token, SECRET_KEY or "", algorithms=[ALGORITHM])
+        email: str = payload.get("sub") or ""
+        if not email:
+            return None
+    except JWTError:
+        return None
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(User.id).where(User.email == email))
+        return result.scalar_one_or_none()
 
 
 async def track_ux_metrics(request: Request, call_next):
     start_time = time.time()
 
-    client_ip = get_client_ip(request)
-    update_active_users(client_ip)
+    user_id = await get_user_id_from_request(request)
+    if user_id:
+        update_active_users(user_id)
 
     response = await call_next(request)
 
