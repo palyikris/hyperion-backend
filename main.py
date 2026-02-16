@@ -7,6 +7,7 @@ from app.api import auth
 from app.api import system
 from app.api import dashboard
 from fastapi.middleware.cors import CORSMiddleware
+from app.api.dashboard_utils.ux import track_ux_metrics
 import os
 
 # media, stats
@@ -37,6 +38,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["Authorization", "Content-Type"],
 )
+
+@app.middleware("http")
+async def middleware(request, call_next):
+    return await track_ux_metrics(request, call_next)
 
 # Public Routes
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
