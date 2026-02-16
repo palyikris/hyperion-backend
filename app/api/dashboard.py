@@ -47,8 +47,9 @@ async def get_system_health(current_user=Depends(get_current_user)):
     """
     cpu_load = psutil.cpu_percent(interval=None)
     ram_load = psutil.virtual_memory().percent
+    cpu_count = psutil.cpu_count(logical=True)
 
-    load_history.append(round(cpu_load))
+    load_history.append(round(cpu_load / float(cpu_count or 0) * 100))
     load_history.append(round(ram_load))
 
     system_status = "ACTIVE"
