@@ -5,6 +5,7 @@ load_dotenv()
 from fastapi import FastAPI
 from app.api import auth
 from app.api import system
+from app.api import dashboard
 from fastapi.middleware.cors import CORSMiddleware
 import os
 
@@ -40,6 +41,7 @@ app.add_middleware(
 # Public Routes
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(system.router, prefix="/api", tags=["System"])
+app.include_router(dashboard.router, prefix="/api/dashboard", tags=["Dashboard"])
 
 # protected Routes
 # app.include_router(media.router, prefix="/media", tags=["Media Operations"])
