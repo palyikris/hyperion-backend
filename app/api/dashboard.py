@@ -11,6 +11,7 @@ from app.models.dashboard.ai_workers import AIWorkersResponse
 import random
 import psutil
 from fastapi.responses import JSONResponse
+from datetime import datetime, timezone
 
 
 router = APIRouter()
@@ -66,6 +67,7 @@ async def get_system_health(current_user=Depends(get_current_user)):
             "server_load": list(load_history),  # Convert deque to list for JSON
             "environment": "PROD",
             "status": system_status,
+            "last_updated": datetime.now(timezone.utc).isoformat(),
         }
     )
 
