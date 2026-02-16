@@ -28,12 +28,10 @@ load_history = deque([0, 0, 0, 0, 0, 0, 0], maxlen=7)
 
 
 def get_formatted_uptime():
-    """Calculates how long the API has been active."""
+    """Calculates uptime as a percentage of a 24-hour window."""
     uptime_seconds = time.time() - START_TIME
-    health_score = min(
-        99.9, (uptime_seconds / 86400) * 99.9
-    )  # cap at 99.9% based on days active
-    return round(health_score, 1)
+    uptime_percent = min(100.0, (uptime_seconds / 86400) * 100.0)
+    return round(uptime_percent, 1)
 
 
 @router.get(
