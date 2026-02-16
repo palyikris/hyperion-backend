@@ -43,22 +43,22 @@ async def get_system_health(current_user=Depends(get_current_user)):
     """
     Returns real-time hardware metrics for the Hyperion environment.
     """
-    cpu_load = psutil.cpu_percent(interval=None)
+    cpu_load = psutil.cpu_percent(interval=0.1)
+
     ram_load = psutil.virtual_memory().percent
-    cpu_count = psutil.cpu_count(logical=True)
 
-    load_history.append(round(cpu_load / float(cpu_count or 0) * 100))
-    load_history.append(round(ram_load))
+    combined_pressure = max(cpu_load, ram_load)
 
-    system_status = "ACTIVE"
-    if cpu_load > 99 or ram_load > 99:
+    load_history.append(round(combined_pressure))
+
+    if combined_pressure > 95:
         system_status = "STRESSED"
-
-    if cpu_load > 95 or ram_load > 95:
+    elif combined_pressure > 80:
         system_status = "HEAVY_LOAD"
-
-    if cpu_load < 50 and ram_load < 50:
+    elif combined_pressure < 30:
         system_status = "STABILIZED"
+    else:
+        system_status = "ACTIVE"
 
     return JSONResponse(
         content={
