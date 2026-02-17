@@ -60,7 +60,7 @@ def get_node_status(node_data: dict):
 
     seconds_since_ping = time.time() - last_ping
 
-    if seconds_since_ping > 120:
+    if last_ping == 0 or seconds_since_ping > 120:
         return "Offline"
 
     if activity == "Working":
@@ -88,7 +88,11 @@ async def get_worker_status(current_user=Depends(get_current_user)):
 
     return {
         "total_active_fleet": active_count,
-        "cluster_status": "Optimal" if active_count >= 3 else "Degraded",
+        "cluster_status": (
+            "Stressed"
+            if active_count >= 8
+            else "Optimal" if active_count >= 3 else "Degraded"
+        ),
         "nodes": nodes,
         "last_updated": datetime.now(timezone.utc).isoformat(),
     }
@@ -111,3 +115,11 @@ async def dispatch_simulation(
         "action": action,
         "queue_size": task_queue.qsize(),
     }
+
+
+async def start_worker_fleet():
+    """
+    starts the loop
+    """
+    for name in worker_registry.keys():
+        asyncio.create_task(ai_worker_process(name))
