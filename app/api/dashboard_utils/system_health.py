@@ -14,7 +14,7 @@ router = APIRouter()
 
 START_TIME = time.time()
 # Initialize with zeros so the chart does not look broken on first load.
-load_history = deque([0, 0, 0, 0, 0, 0, 0], maxlen=7)
+load_history = deque([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], maxlen=7)
 _last_cpu_usage = None
 _last_cpu_time = None
 
@@ -71,10 +71,6 @@ def get_container_cpu_percent():
                         current_usage = int(line.split()[1])
                         current_time = time.time()
 
-                        print(
-                            f"[CPU DEBUG] cgroup v2 found, usage={current_usage}, last={_last_cpu_usage}"
-                        )
-
                         if _last_cpu_usage is not None and _last_cpu_time is not None:
                             usage_diff = current_usage - _last_cpu_usage
                             time_diff = current_time - _last_cpu_time
@@ -82,16 +78,11 @@ def get_container_cpu_percent():
                             cpu_percent = (usage_diff / (time_diff * 1_000_000)) * 100.0
                             _last_cpu_usage = current_usage
                             _last_cpu_time = current_time
-                            result = min(100.0, max(0.0, cpu_percent))
-                            print(
-                                f"[CPU DEBUG] Calculated: diff={usage_diff}μs, time={time_diff:.2f}s, result={result:.1f}%"
-                            )
-                            return result
+                            return min(100.0, max(0.0, cpu_percent))
                         else:
                             # First call - initialize and return 0 (no previous measurement to compare)
                             _last_cpu_usage = current_usage
                             _last_cpu_time = current_time
-                            print(f"[CPU DEBUG] First call, initializing")
                             return 0.0
 
         # Try cgroup v1
@@ -100,10 +91,6 @@ def get_container_cpu_percent():
                 current_usage = int(f.read().strip())
                 current_time = time.time()
 
-                print(
-                    f"[CPU DEBUG] cgroup v1 found, usage={current_usage}, last={_last_cpu_usage}"
-                )
-
                 if _last_cpu_usage is not None and _last_cpu_time is not None:
                     usage_diff = current_usage - _last_cpu_usage
                     time_diff = current_time - _last_cpu_time
@@ -111,24 +98,16 @@ def get_container_cpu_percent():
                     cpu_percent = (usage_diff / (time_diff * 1_000_000_000)) * 100.0
                     _last_cpu_usage = current_usage
                     _last_cpu_time = current_time
-                    result = min(100.0, max(0.0, cpu_percent))
-                    print(
-                        f"[CPU DEBUG] Calculated: diff={usage_diff}ns, time={time_diff:.2f}s, result={result:.1f}%"
-                    )
-                    return result
+                    return min(100.0, max(0.0, cpu_percent))
                 else:
                     # First call - initialize and return 0 (no previous measurement to compare)
                     _last_cpu_usage = current_usage
                     _last_cpu_time = current_time
-                    print(f"[CPU DEBUG] First call, initializing")
                     return 0.0
-    except Exception as e:
-        print(f"[CPU DEBUG] Exception: {e}")
+    except Exception:
         pass
 
     # Fallback: return 0 if no cgroup files available (avoid unreliable psutil in containers)
-    # If psutil is needed for local dev, it can be enabled but returns 0 in production
-    print(f"[CPU DEBUG] No cgroup files found, returning 0")
     return 0.0
 
 
@@ -152,10 +131,8 @@ async def get_system_health(current_user=Depends(get_current_user)):
     cpu_load = get_container_cpu_percent()
     ram_load = get_container_memory_percent()
 
-    print(f"[METRICS] CPU={cpu_load:.1f}%, RAM={ram_load:.1f}%")
-
     combined_pressure = max(cpu_load, ram_load)
-    load_history.append(round(combined_pressure))
+    load_history.append(round(combined_pressure, 1))
 
     if combined_pressure > 95:
         system_status = "STRESSED"
