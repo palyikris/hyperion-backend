@@ -8,6 +8,8 @@ import asyncio
 import uuid
 import time
 
+from datetime import datetime, timezone
+
 # A shared queue for all workers
 task_queue = asyncio.Queue()
 
@@ -88,6 +90,7 @@ async def get_worker_status(current_user=Depends(get_current_user)):
         "total_active_fleet": active_count,
         "cluster_status": "Optimal" if active_count >= 3 else "Degraded",
         "nodes": nodes,
+        "last_updated": datetime.now(timezone.utc).isoformat(),
     }
 
 

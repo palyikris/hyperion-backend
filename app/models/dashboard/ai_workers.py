@@ -9,3 +9,4 @@ class AIWorkersResponse(BaseModel):
     total_active_fleet: int
     cluster_status: str
     nodes: list[NodeInfo]
+    last_updated: Optional[str]
