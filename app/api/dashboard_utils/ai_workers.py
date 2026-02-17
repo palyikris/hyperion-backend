@@ -81,7 +81,7 @@ async def get_worker_status(current_user=Depends(get_current_user)):
     for name, data in worker_registry.items():
         status_label = get_node_status(data)
 
-        if status_label in ["Active", "Working"]:
+        if status_label in ["Active", "Working", "Looking for work"]:
             active_count += 1
 
         nodes.append({"name": name, "status": status_label})
