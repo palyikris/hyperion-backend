@@ -32,6 +32,7 @@ worker_registry = {
 async def ai_worker_process(name: str):
     while True:
         worker_registry[name]["last_ping"] = time.time()
+        worker_registry[name]["activity"] = "Looking for work"
 
         try:
             task = await asyncio.wait_for(task_queue.get(), timeout=1.0)
@@ -61,6 +62,9 @@ def get_node_status(node_data: dict):
 
     if activity == "Working":
         return "Working"
+
+    if activity == "Looking for work":
+        return "Looking for work"
 
     return "Active"
 
