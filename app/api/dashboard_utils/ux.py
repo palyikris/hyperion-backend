@@ -22,11 +22,35 @@ router = APIRouter()
 active_users = {}
 response_times = deque(maxlen=50)
 active_trend_history = deque([0, 0, 0, 0, 0, 0, 0], maxlen=7)
-daily_history = [0, 0, 0, 0, 0, 0, 0]
+daily_history = deque([0, 0, 0, 0, 0, 0, 0], maxlen=7)
+last_trend_update = 0  # Start at 0 so first update happens immediately
+daily_user_sessions = {}  # tracks unique users per day
+current_day = datetime.now(timezone.utc).date()
+
+
+def update_metrics():
+    """Update trend history and daily metrics."""
+    global last_trend_update, current_day, daily_user_sessions
+    current_time = time.time()
+    today = datetime.now(timezone.utc).date()
+
+    # Update active user trend every 60 seconds (more responsive for monitoring)
+    if current_time - last_trend_update > 60:
+        active_trend_history.append(len(active_users))
+        last_trend_update = current_time
+
+    # Reset daily counter if day changed
+    if today != current_day:
+        daily_history.append(len(daily_user_sessions))
+        daily_user_sessions = {}
+        current_day = today
 
 
 def update_active_users(user_id: str):
+    global daily_user_sessions
     active_users[user_id] = time.time()
+    daily_user_sessions[user_id] = True  # Track unique users today
+
     # cleanup users who havent made a request in 5 minutes
     current_time = time.time()
     expired = [
@@ -34,6 +58,9 @@ def update_active_users(user_id: str):
     ]
     for ip in expired:
         del active_users[ip]
+
+    # Update metrics
+    update_metrics()
 
 
 async def get_user_id_from_request(request: Request) -> Optional[str]:
@@ -78,6 +105,9 @@ async def user_experience(current_user=Depends(get_current_user)):
     """
     Returns engagement metrics for the dashboard.
     """
+    # Ensure metrics are up to date
+    update_metrics()
+
     return JSONResponse(
         content={
             "active_now": len(active_users),
