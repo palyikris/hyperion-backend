@@ -32,9 +32,9 @@ worker_registry = {
 async def ai_worker_process(name: str):
     while True:
         worker_registry[name]["last_ping"] = time.time()
-        worker_registry[name]["activity"] = "Looking for work"
 
         try:
+            worker_registry[name]["activity"] = "Looking for work"
             task = await asyncio.wait_for(task_queue.get(), timeout=1.0)
 
             worker_registry[name]["activity"] = "Working"
