@@ -14,10 +14,7 @@ engine = create_async_engine(
     echo=True,
     pool_pre_ping=True,  # verify connections are alive before using them
     pool_size=10,
-    connect_args={
-        "timeout": 10,
-        "command_timeout": 10,
-    },
+    max_overflow=20,
 )
 AsyncSessionLocal = async_sessionmaker(
     bind=engine, class_=AsyncSession, expire_on_commit=False
