@@ -4,7 +4,67 @@ from fastapi.responses import JSONResponse
 from app.api.deps import get_current_user
 from app.models.dashboard.ai_workers import AIWorkersResponse
 
+import asyncio
+import uuid
+import time
+
+# A shared queue for all workers
+task_queue = asyncio.Queue()
+
 router = APIRouter()
+
+# --- AI Worker Registry ---
+# Now tracking timestamp AND current state
+# --- AI Worker Registry ---
+# Now tracking timestamp AND current state
+worker_registry = {
+    "Helios": {"last_ping": time.time(), "activity": "Idle"},
+    "Eos": {"last_ping": time.time(), "activity": "Idle"},
+    "Aethon": {"last_ping": time.time(), "activity": "Idle"},
+    "Crius": {"last_ping": time.time(), "activity": "Idle"},
+    "Iapetus": {"last_ping": time.time(), "activity": "Idle"},
+    "Perses": {"last_ping": time.time(), "activity": "Idle"},
+    "Phlegon": {"last_ping": time.time(), "activity": "Idle"},
+    "Phoebe": {"last_ping": time.time(), "activity": "Idle"},
+    "Theia": {"last_ping": time.time(), "activity": "Idle"},
+    "Cronus": {"last_ping": time.time(), "activity": "Idle"},
+}
+
+
+async def ai_worker_process(name: str):
+    while True:
+        worker_registry[name]["last_ping"] = time.time()
+
+        try:
+            task = await asyncio.wait_for(task_queue.get(), timeout=1.0)
+
+            worker_registry[name]["activity"] = "Working"
+
+            # simulate AI workload
+            await asyncio.sleep(25)
+
+            worker_registry[name]["activity"] = "Idle"
+            task_queue.task_done()
+
+        except asyncio.TimeoutError:
+            # no task
+            worker_registry[name]["activity"] = "Idle"
+            continue
+
+
+def get_node_status(node_data: dict):
+    last_ping = node_data.get("last_ping", time.time())
+    activity = node_data.get("activity", "Idle")
+
+    seconds_since_ping = time.time() - last_ping
+
+    if seconds_since_ping > 120:
+        return "Offline"
+
+    if activity == "Working":
+        return "Working"
+
+    return "Active"
 
 
 @router.get(
@@ -12,19 +72,20 @@ router = APIRouter()
     status_code=status.HTTP_200_OK,
     response_model=AIWorkersResponse,
 )
-async def ai_workers(current_user=Depends(get_current_user)):
-    """
-    Mock endpoint for the upcoming AI Worker fleet implementation.
-    """
-    return JSONResponse(
-        content={
-            "total_active_fleet": 12,
-            "cluster_status": "Stabilized",
-            "nodes": [
-                {"name": "Orion", "status": "Active"},
-                {"name": "Vega", "status": "Syncing"},
-                {"name": "Lyra", "status": "Idle"},
-                {"name": "Atlas", "status": "Paused"},
-            ],
-        }
-    )
+async def get_worker_status(current_user=Depends(get_current_user)):
+    nodes = []
+    active_count = 0
+
+    for name, data in worker_registry.items():
+        status_label = get_node_status(data)
+
+        if status_label in ["Active", "Working"]:
+            active_count += 1
+
+        nodes.append({"name": name, "status": status_label})
+
+    return {
+        "total_active_fleet": active_count,
+        "cluster_status": "Optimal" if active_count >= 3 else "Degraded",
+        "nodes": nodes,
+    }
