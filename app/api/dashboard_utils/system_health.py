@@ -33,9 +33,14 @@ def get_container_memory_percent():
                 limit_str = f.read().strip()
                 # "max" means no limit, fall back to psutil
                 if limit_str == "max":
+                    print(f"DEBUG MEM: cgroup v2 - no limit set, using psutil")
                     return psutil.virtual_memory().percent
                 limit = int(limit_str)
-            return (used / limit) * 100.0
+            percent = (used / limit) * 100.0
+            print(
+                f"DEBUG MEM: cgroup v2 - used={used/(1024**3):.2f}GB, limit={limit/(1024**3):.2f}GB, percent={percent:.1f}%"
+            )
+            return percent
 
         # trying cgroup v1
         elif os.path.exists("/sys/fs/cgroup/memory/memory.usage_in_bytes"):
@@ -45,13 +50,25 @@ def get_container_memory_percent():
                 limit = int(f.read().strip())
             # very high -> not actual limit
             if limit > 1e15:
+                print(
+                    f"DEBUG MEM: cgroup v1 - no limit set (limit={limit}), using psutil"
+                )
                 return psutil.virtual_memory().percent
-            return (used / limit) * 100.0
-    except Exception:
+            percent = (used / limit) * 100.0
+            print(
+                f"DEBUG MEM: cgroup v1 - used={used/(1024**3):.2f}GB, limit={limit/(1024**3):.2f}GB, percent={percent:.1f}%"
+            )
+            return percent
+    except Exception as e:
+        print(f"DEBUG MEM: cgroup read failed ({e}), using psutil")
         pass
 
     # local development
-    return psutil.virtual_memory().percent
+    mem = psutil.virtual_memory()
+    print(
+        f"DEBUG MEM: psutil fallback - {mem.percent:.1f}% ({mem.used/(1024**3):.2f}GB / {mem.total/(1024**3):.2f}GB)"
+    )
+    return mem.percent
 
 
 def get_container_cpu_percent():
