@@ -33,14 +33,9 @@ def get_container_memory_percent():
                 limit_str = f.read().strip()
                 # "max" means no limit, fall back to psutil
                 if limit_str == "max":
-                    print(f"DEBUG MEM: cgroup v2 - no limit set, using psutil")
                     return psutil.virtual_memory().percent
                 limit = int(limit_str)
-            percent = (used / limit) * 100.0
-            print(
-                f"DEBUG MEM: cgroup v2 - used={used/(1024**3):.2f}GB, limit={limit/(1024**3):.2f}GB, percent={percent:.1f}%"
-            )
-            return percent
+            return (used / limit) * 100.0
 
         # trying cgroup v1
         elif os.path.exists("/sys/fs/cgroup/memory/memory.usage_in_bytes"):
@@ -50,25 +45,13 @@ def get_container_memory_percent():
                 limit = int(f.read().strip())
             # very high -> not actual limit
             if limit > 1e15:
-                print(
-                    f"DEBUG MEM: cgroup v1 - no limit set (limit={limit}), using psutil"
-                )
                 return psutil.virtual_memory().percent
-            percent = (used / limit) * 100.0
-            print(
-                f"DEBUG MEM: cgroup v1 - used={used/(1024**3):.2f}GB, limit={limit/(1024**3):.2f}GB, percent={percent:.1f}%"
-            )
-            return percent
-    except Exception as e:
-        print(f"DEBUG MEM: cgroup read failed ({e}), using psutil")
+            return (used / limit) * 100.0
+    except Exception:
         pass
 
     # local development
-    mem = psutil.virtual_memory()
-    print(
-        f"DEBUG MEM: psutil fallback - {mem.percent:.1f}% ({mem.used/(1024**3):.2f}GB / {mem.total/(1024**3):.2f}GB)"
-    )
-    return mem.percent
+    return psutil.virtual_memory().percent
 
 
 def get_container_cpu_percent():
@@ -92,21 +75,14 @@ def get_container_cpu_percent():
                             time_diff = current_time - _last_cpu_time
                             # converting microseconds to percentage
                             cpu_percent = (usage_diff / (time_diff * 1_000_000)) * 100.0
-                            print(
-                                f"DEBUG CPU: cgroup v2 - usage_diff={usage_diff}μs, time_diff={time_diff:.3f}s, raw_percent={cpu_percent:.1f}%"
-                            )
                             _last_cpu_usage = current_usage
                             _last_cpu_time = current_time
-                            result = min(100.0, max(0.0, cpu_percent))
-                            print(f"DEBUG CPU: cgroup v2 - final={result:.1f}%")
-                            return result
+                            return min(100.0, max(0.0, cpu_percent))
                         else:
+                            # First call - initialize and return 0 (no previous measurement to compare)
                             _last_cpu_usage = current_usage
                             _last_cpu_time = current_time
-                            print(
-                                f"DEBUG CPU: cgroup v2 - initializing (usage={current_usage}, time={current_time}), using psutil"
-                            )
-                            return psutil.cpu_percent(interval=0.1)
+                            return 0.0
 
         # Try cgroup v1
         elif os.path.exists("/sys/fs/cgroup/cpuacct/cpuacct.usage"):
@@ -119,28 +95,18 @@ def get_container_cpu_percent():
                     time_diff = current_time - _last_cpu_time
                     # converting nanoseconds to percentage
                     cpu_percent = (usage_diff / (time_diff * 1_000_000_000)) * 100.0
-                    print(
-                        f"DEBUG CPU: cgroup v1 - usage_diff={usage_diff}ns, time_diff={time_diff:.3f}s, raw_percent={cpu_percent:.1f}%"
-                    )
                     _last_cpu_usage = current_usage
                     _last_cpu_time = current_time
-                    result = min(100.0, max(0.0, cpu_percent))
-                    print(f"DEBUG CPU: cgroup v1 - final={result:.1f}%")
-                    return result
+                    return min(100.0, max(0.0, cpu_percent))
                 else:
+                    # First call - initialize and return 0 (no previous measurement to compare)
                     _last_cpu_usage = current_usage
                     _last_cpu_time = current_time
-                    print(
-                        f"DEBUG CPU: cgroup v1 - initializing (usage={current_usage}, time={current_time}), using psutil"
-                    )
-                    return psutil.cpu_percent(interval=0.1)
-    except Exception as e:
-        print(f"DEBUG CPU: cgroup read failed ({e}), using psutil")
+                    return 0.0
+    except Exception:
         pass
 
-    cpu = psutil.cpu_percent(interval=0.1)
-    print(f"DEBUG CPU: psutil fallback - {cpu:.1f}%")
-    return cpu
+    return psutil.cpu_percent(interval=0.1)
 
 
 def get_formatted_uptime():
@@ -165,10 +131,6 @@ async def get_system_health(current_user=Depends(get_current_user)):
 
     combined_pressure = max(cpu_load, ram_load)
     load_history.append(round(combined_pressure))
-
-    print(
-        f"DEBUG FINAL: CPU={cpu_load:.1f}%, RAM={ram_load:.1f}%, combined={combined_pressure:.1f}%, history={list(load_history)}"
-    )
 
     if combined_pressure > 95:
         system_status = "STRESSED"
