@@ -6,6 +6,6 @@ class NodeInfo(BaseModel):
     name: str
 
 class AIWorkersResponse(BaseModel):
-    total_active_fleets: int
+    total_active_fleet: int
     cluster_status: str
     nodes: list[NodeInfo]

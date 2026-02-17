@@ -53,7 +53,7 @@ async def ai_worker_process(name: str):
 
 
 def get_node_status(node_data: dict):
-    last_ping = node_data.get("last_ping", time.time())
+    last_ping = node_data.get("last_ping", 0)
     activity = node_data.get("activity", "Idle")
 
     seconds_since_ping = time.time() - last_ping
@@ -89,3 +89,30 @@ async def get_worker_status(current_user=Depends(get_current_user)):
         "cluster_status": "Optimal" if active_count >= 3 else "Degraded",
         "nodes": nodes,
     }
+
+
+@router.post("/ai-workers/dispatch")
+async def dispatch_simulation(
+    action: str = "Generic AI Task", current_user=Depends(get_current_user)
+):
+    """
+    Manually injects a task into the fleet's queue.
+    """
+    task_id = str(uuid.uuid4())[:8]
+    task = {"id": task_id, "action": action, "timestamp": time.time()}
+
+    await task_queue.put(task)
+
+    return {
+        "message": f"Task {task_id} dispatched to the Titan fleet.",
+        "action": action,
+        "queue_size": task_queue.qsize(),
+    }
+
+
+async def _init_queue():
+    for i in range(5):
+        await task_queue.put({"id": i, "action": "Massive Compute"})
+
+
+asyncio.create_task(_init_queue())
