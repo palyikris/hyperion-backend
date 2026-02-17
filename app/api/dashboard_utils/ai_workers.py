@@ -13,10 +13,6 @@ task_queue = asyncio.Queue()
 
 router = APIRouter()
 
-# --- AI Worker Registry ---
-# Now tracking timestamp AND current state
-# --- AI Worker Registry ---
-# Now tracking timestamp AND current state
 worker_registry = {
     "Helios": {"last_ping": time.time(), "activity": "Idle"},
     "Eos": {"last_ping": time.time(), "activity": "Idle"},
@@ -34,6 +30,10 @@ worker_registry = {
 async def ai_worker_process(name: str):
     while True:
         worker_registry[name]["last_ping"] = time.time()
+
+        print(
+            f"{name} pinged at {time.strftime('%X')} - Activity: {worker_registry[name]['activity']}"
+        )
 
         try:
             task = await asyncio.wait_for(task_queue.get(), timeout=1.0)
@@ -108,11 +108,3 @@ async def dispatch_simulation(
         "action": action,
         "queue_size": task_queue.qsize(),
     }
-
-
-async def _init_queue():
-    for i in range(5):
-        await task_queue.put({"id": i, "action": "Massive Compute"})
-
-
-asyncio.create_task(_init_queue())
