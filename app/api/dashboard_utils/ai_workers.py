@@ -73,12 +73,15 @@ def get_node_status(node_data: dict):
 async def get_worker_status(current_user=Depends(get_current_user)):
     nodes = []
     active_count = 0
+    working_count = 0
 
     for name, data in worker_registry.items():
         status_label = get_node_status(data)
 
         if status_label in ["Active", "Working"]:
             active_count += 1
+        if status_label == "Working":
+            working_count += 1
 
         nodes.append({"name": name, "status": status_label})
 
@@ -86,7 +89,7 @@ async def get_worker_status(current_user=Depends(get_current_user)):
         "total_active_fleet": active_count,
         "cluster_status": (
             "Stressed"
-            if active_count >= 8
+            if working_count >= 8
             else "Optimal" if active_count >= 3 else "Degraded"
         ),
         "nodes": nodes,
