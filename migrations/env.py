@@ -33,10 +33,14 @@ if database_url:
 from app.database import Base
 from app.models.db.TokenBlacklist import (
     TokenBlacklist,
-)  # This import is CRITICAL so Base knows about the table
+)
 from app.models.db.User import (
     User,
-)  # This import is CRITICAL so Base knows about the table
+)
+from app.models.db.Media import Media
+from app.models.upload.MediaStatus import MediaStatus
+from app.models.db.AIWorker import AIWorkerState
+from app.models.db.MediaLog import MediaLog
 
 target_metadata = Base.metadata
 

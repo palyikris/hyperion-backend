@@ -1,0 +1,43 @@
+from sqlalchemy import String, ForeignKey, JSON, DateTime, Enum
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+from datetime import datetime, timezone
+import uuid
+from app.database import Base
+from app.models.upload.MediaStatus import MediaStatus
+
+class Media(Base):
+    __tablename__ = "media"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    uploader_id: Mapped[str] = mapped_column(
+        String(20), ForeignKey("users.id"), nullable=False
+    )
+
+    status: Mapped[MediaStatus] = mapped_column(
+        Enum(MediaStatus), default=MediaStatus.PENDING
+    )
+    hf_path: Mapped[str] = mapped_column(String, nullable=True)
+
+    initial_metadata: Mapped[dict] = mapped_column(
+        JSON, nullable=True
+    )  # W, H, Size (API side)
+    technical_metadata: Mapped[dict] = mapped_column(
+        JSON, nullable=True
+    )  # EXIF, GPS (Worker side)
+
+    assigned_worker: Mapped[str] = mapped_column(
+        String, ForeignKey("ai_worker_states.name"), nullable=True
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    # Relationships
+    uploader = relationship("User", backref="uploads")
+    worker = relationship("AIWorkerState", backref="current_tasks")
