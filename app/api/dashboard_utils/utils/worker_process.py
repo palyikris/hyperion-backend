@@ -14,10 +14,9 @@ async def ai_worker_process(name: str):
     Persistent background loop for a specific Titan worker.
     """
 
-    async with worker_signal:
-        await worker_signal.wait()
-
     while True:
+        async with worker_signal:
+            await worker_signal.wait()
         async with AsyncSessionLocal() as session:
             try:
                 await session.execute(
@@ -40,7 +39,6 @@ async def ai_worker_process(name: str):
                 media_task = result.scalar_one_or_none()
 
                 if not media_task:
-                    await asyncio.sleep(10) 
                     continue
 
                 # --- PHASE 1: EXTRACTION (Simulation) ---

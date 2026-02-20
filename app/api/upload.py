@@ -23,17 +23,9 @@ from fastapi.responses import JSONResponse
 from fastapi import HTTPException, status
 from app.models.upload.UploadResponse import UploadResponse
 from datetime import datetime, timezone
+from app.api.upload_utils.hf_upload import process_hf_upload
 
 router = APIRouter()
-
-
-async def upload_to_hf_task(
-    media_ids: list[uuid.UUID], files: list[tuple[str, bytes]], user_id: str
-):
-    """Background task to stream files to HF and wake workers."""
-    # todo implement hf upload here
-    async with worker_signal:
-        worker_signal.notify_all()
 
 
 @router.post(
@@ -91,8 +83,7 @@ async def batch_upload(
     await db.commit()
 
     background_tasks.add_task(
-        upload_to_hf_task,
-        [m.id for m in media_records],
+        process_hf_upload,
         files_to_process,
         current_user.id,
     )

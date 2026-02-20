@@ -8,6 +8,8 @@ from app.models.db.Media import Media
 from app.models.upload.MediaStatus import MediaStatus
 from app.api.upload_utils.conn_manager import worker_signal, manager
 from app.models.db.MediaLog import MediaLog
+from concurrent.futures import ThreadPoolExecutor
+import asyncio
 
 # Configuration from Environment
 HF_TOKEN = os.getenv("HF_TOKEN")
@@ -25,18 +27,20 @@ async def process_hf_upload(
 
     async with AsyncSessionLocal() as session:
         for m_id, filename, content in files_data:
-            # Construct partitioned path: media/{user_id}/{date}/{uuid}_{filename}
-            # This prevents directory bloat in the HF repository.
+            # prevents directory bloat in the HF repository.
             hf_path = f"media/{user_id}/{date_str}/{m_id}_{filename}"
 
             try:
-                # handles the Git LFS transfer automatically.
-                api.upload_file(
-                    path_or_fileobj=content,
-                    path_in_repo=hf_path,
-                    repo_id=HF_REPO_ID or "",
-                    repo_type="dataset",
-                    commit_message=f"Upload media {m_id} for user {user_id}",
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(
+                    None,
+                    lambda: api.upload_file(
+                        path_or_fileobj=content,
+                        path_in_repo=hf_path,
+                        repo_id=HF_REPO_ID or "",
+                        repo_type="dataset",
+                        commit_message=f"Upload media {m_id} for user {user_id}",
+                    ),
                 )
 
                 await session.execute(
@@ -48,7 +52,7 @@ async def process_hf_upload(
                         updated_at=datetime.now(timezone.utc),
                     )
                 )
-                
+
                 insert_log = MediaLog(
                     media_id=m_id,
                     status=MediaStatus.UPLOADED,
@@ -56,14 +60,14 @@ async def process_hf_upload(
                     timestamp=datetime.now(timezone.utc),
                 )
                 session.add(insert_log)
-                
+
                 await manager.send_status(
                     user_id=str(user_id),
                     media_id=str(m_id),
                     status=MediaStatus.UPLOADED.value,
                     worker=None,
                 )
-                
+
                 await session.commit()
 
                 # wake up workers
