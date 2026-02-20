@@ -35,6 +35,7 @@ async def initialize_worker_fleet():
                 ) 
                 await session.execute(stmt)
 
-                asyncio.create_task(ai_worker_process(name))
+    for name in TITAN_FLEET:
+        asyncio.create_task(ai_worker_process(name))
 
-            asyncio.create_task(ai_reaper_process())
+    asyncio.create_task(ai_reaper_process())

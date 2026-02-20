@@ -1,0 +1,24 @@
+import uuid
+from datetime import datetime, timezone
+
+from app.models.db.MediaLog import MediaLog
+from app.models.upload.MediaStatus import MediaStatus
+
+
+def create_status_change_log(
+    media_id: uuid.UUID,
+    status: MediaStatus,
+    worker_name: str | None = None,
+    detail: str | None = None,
+) -> MediaLog:
+    message = f"Status changed to {status.value}"
+    if detail:
+        message = f"{message} ({detail})"
+
+    return MediaLog(
+        media_id=media_id,
+        worker_name=worker_name,
+        action="STATUS_CHANGE",
+        message=message,
+        timestamp=datetime.now(timezone.utc),
+    )

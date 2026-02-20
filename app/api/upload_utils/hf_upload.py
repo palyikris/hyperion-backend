@@ -4,10 +4,10 @@ from datetime import datetime, timezone
 from sqlalchemy import update
 from huggingface_hub import HfApi
 from app.database import AsyncSessionLocal
+from app.api.media_log_utils import create_status_change_log
 from app.models.db.Media import Media
 from app.models.upload.MediaStatus import MediaStatus
 from app.api.upload_utils.conn_manager import worker_signal, manager
-from app.models.db.MediaLog import MediaLog
 from concurrent.futures import ThreadPoolExecutor
 import asyncio
 
@@ -53,11 +53,9 @@ async def process_hf_upload(
                     )
                 )
 
-                insert_log = MediaLog(
+                insert_log = create_status_change_log(
                     media_id=m_id,
                     status=MediaStatus.UPLOADED,
-                    worker=None,
-                    timestamp=datetime.now(timezone.utc),
                 )
                 session.add(insert_log)
 

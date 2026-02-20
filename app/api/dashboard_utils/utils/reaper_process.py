@@ -2,9 +2,9 @@ import asyncio
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import select, update, or_
 from app.database import AsyncSessionLocal
+from app.api.media_log_utils import create_status_change_log
 from app.models.db.Media import Media
 from app.models.db.AIWorker import AIWorkerState
-from app.models.db.MediaLog import MediaLog
 from app.models.upload.MediaStatus import MediaStatus
 from app.api.upload_utils.conn_manager import worker_signal, manager
 
@@ -21,6 +21,8 @@ async def ai_reaper_process():
             try:
                 now = datetime.now(timezone.utc)
                 threshold = now - timedelta(minutes=10)
+                pending_threshold = now - timedelta(minutes=15)
+                changes_made = False
 
                 stale_uploaded = await session.execute(
                     select(Media.id).where(
@@ -33,6 +35,33 @@ async def ai_reaper_process():
                 if stale_uploaded.scalars().first():
                     async with worker_signal:
                         worker_signal.notify_all()
+
+                stale_pending_query = await session.execute(
+                    select(Media).where(
+                        Media.status == MediaStatus.PENDING,
+                        Media.updated_at <= pending_threshold,
+                    )
+                )
+                stale_pending_tasks = stale_pending_query.scalars().all()
+
+                for task in stale_pending_tasks:
+                    failure_log = create_status_change_log(
+                        media_id=task.id,
+                        status=MediaStatus.FAILED,
+                        detail="reaper pending timeout",
+                    )
+                    session.add(failure_log)
+
+                    await manager.send_status(
+                        user_id=str(task.uploader_id),
+                        media_id=str(task.id),
+                        status=MediaStatus.FAILED.value,
+                        worker=None,
+                    )
+
+                    task.status = MediaStatus.FAILED
+                    task.assigned_worker = None
+                    changes_made = True
 
                 offline_workers_query = await session.execute(
                     select(AIWorkerState.name).where(
@@ -56,14 +85,13 @@ async def ai_reaper_process():
                     zombie_tasks = zombie_tasks_query.scalars().all()
 
                     for task in zombie_tasks:
-                        recovery_log = MediaLog(
+                        recovery_log = create_status_change_log(
                             media_id=task.id,
                             status=MediaStatus.UPLOADED,
-                            worker=None,
-                            timestamp=now,
+                            detail="reaper recovery",
                         )
                         session.add(recovery_log)
-                        
+
                         await manager.send_status(
                             user_id=str(task.uploader_id),
                             media_id=str(task.id),
@@ -73,7 +101,9 @@ async def ai_reaper_process():
 
                         task.status = MediaStatus.UPLOADED
                         task.assigned_worker = None
+                        changes_made = True
 
+                if changes_made:
                     await session.commit()
 
             except Exception as e:

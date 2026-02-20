@@ -2,8 +2,8 @@ import asyncio
 from datetime import datetime, timezone, date
 from sqlalchemy import select, update, insert
 from app.database import AsyncSessionLocal
+from app.api.media_log_utils import create_status_change_log
 from app.models.db.Media import Media
-from app.models.db.MediaLog import MediaLog
 from app.models.db.AIWorker import AIWorkerState
 from app.models.upload.MediaStatus import MediaStatus
 from app.api.upload_utils.conn_manager import worker_signal, manager
@@ -15,8 +15,6 @@ async def ai_worker_process(name: str):
     """
 
     while True:
-        async with worker_signal:
-            await worker_signal.wait()
         async with AsyncSessionLocal() as session:
             try:
                 await session.execute(
@@ -39,17 +37,18 @@ async def ai_worker_process(name: str):
                 media_task = result.scalar_one_or_none()
 
                 if not media_task:
+                    async with worker_signal:
+                        await worker_signal.wait()
                     continue
 
                 # --- PHASE 1: EXTRACTION (Simulation) ---
                 media_task.status = MediaStatus.EXTRACTING
                 media_task.assigned_worker = name
 
-                insert_log = MediaLog(
+                insert_log = create_status_change_log(
                     media_id=media_task.id,
                     status=MediaStatus.EXTRACTING,
-                    worker=name,
-                    timestamp=datetime.now(timezone.utc),
+                    worker_name=name,
                 )
                 session.add(insert_log)
 
@@ -72,11 +71,10 @@ async def ai_worker_process(name: str):
                 # --- PHASE 2: AI PROCESSING (Simulation) ---
                 media_task.status = MediaStatus.PROCESSING
 
-                insert_log = MediaLog(
+                insert_log = create_status_change_log(
                     media_id=media_task.id,
                     status=MediaStatus.PROCESSING,
-                    worker=name,
-                    timestamp=datetime.now(timezone.utc),
+                    worker_name=name,
                 )
                 session.add(insert_log)
 
@@ -102,11 +100,10 @@ async def ai_worker_process(name: str):
                     )
                 )
 
-                insert_log = MediaLog(
+                insert_log = create_status_change_log(
                     media_id=media_task.id,
                     status=MediaStatus.READY,
-                    worker=name,
-                    timestamp=datetime.now(timezone.utc),
+                    worker_name=name,
                 )
                 session.add(insert_log)
 

@@ -12,9 +12,9 @@ from fastapi import (
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.api.deps import get_current_user, get_current_user_from_token
+from app.api.media_log_utils import create_status_change_log
 from app.models.db.Media import Media
 from app.models.upload.MediaStatus import MediaStatus
-from app.models.db.MediaLog import MediaLog
 from app.api.upload_utils.conn_manager import worker_signal, manager
 from PIL import Image
 import io
@@ -22,7 +22,6 @@ import uuid
 from fastapi.responses import JSONResponse
 from fastapi import HTTPException, status
 from app.models.upload.UploadResponse import UploadResponse
-from datetime import datetime, timezone
 from app.api.upload_utils.hf_upload import process_hf_upload
 
 router = APIRouter()
@@ -60,11 +59,9 @@ async def batch_upload(
             },
         )
 
-        insert_log = MediaLog(
+        insert_log = create_status_change_log(
             media_id=media_id,
             status=MediaStatus.PENDING,
-            worker=None,
-            timestamp=datetime.now(timezone.utc),
         )
         db.add(insert_log)
 
