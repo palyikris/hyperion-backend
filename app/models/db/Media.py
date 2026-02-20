@@ -25,7 +25,7 @@ class Media(Base):
         JSON, nullable=True
     )  # EXIF, GPS (Worker side)
 
-    assigned_worker: Mapped[str] = mapped_column(
+    assigned_worker: Mapped[str | None] = mapped_column(
         String, ForeignKey("ai_worker_states.name"), nullable=True
     )
 

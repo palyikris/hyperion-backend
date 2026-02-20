@@ -77,7 +77,7 @@ async def batch_upload(
 
         media_records.append(new_media)
         await file.seek(0)  # reset file pointer
-        files_to_process.append((file.filename, content))
+        files_to_process.append((media_id, file.filename, content))
 
     db.add_all(media_records)
     await db.commit()
