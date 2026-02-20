@@ -1,11 +1,12 @@
 import asyncio
 from datetime import datetime, timezone, date
-from sqlalchemy import select, update
+from sqlalchemy import select, update, insert
 from app.database import AsyncSessionLocal
 from app.models.db.Media import Media
+from app.models.db.MediaLog import MediaLog
 from app.models.db.AIWorker import AIWorkerState
 from app.models.upload.MediaStatus import MediaStatus
-from app.api.dashboard_utils.conn_manager import worker_signal
+from app.api.upload_utils.conn_manager import worker_signal, manager
 
 
 async def ai_worker_process(name: str):
@@ -42,8 +43,24 @@ async def ai_worker_process(name: str):
                     await asyncio.sleep(10) 
                     continue
 
+                # --- PHASE 1: EXTRACTION (Simulation) ---
                 media_task.status = MediaStatus.EXTRACTING
                 media_task.assigned_worker = name
+
+                insert_log = MediaLog(
+                    media_id=media_task.id,
+                    status=MediaStatus.EXTRACTING,
+                    worker=name,
+                    timestamp=datetime.now(timezone.utc),
+                )
+                session.add(insert_log)
+
+                await manager.send_status(
+                    user_id=str(media_task.uploader_id),
+                    media_id=str(media_task.id),
+                    status=MediaStatus.EXTRACTING.value,
+                    worker=name,
+                )
 
                 await session.execute(
                     update(AIWorkerState)
@@ -52,13 +69,28 @@ async def ai_worker_process(name: str):
                 )
                 await session.commit()
 
-                # --- PHASE 1: EXTRACTION (Simulation) ---
                 await asyncio.sleep(5)
 
+                # --- PHASE 2: AI PROCESSING (Simulation) ---
                 media_task.status = MediaStatus.PROCESSING
+
+                insert_log = MediaLog(
+                    media_id=media_task.id,
+                    status=MediaStatus.PROCESSING,
+                    worker=name,
+                    timestamp=datetime.now(timezone.utc),
+                )
+                session.add(insert_log)
+
+                await manager.send_status(
+                    user_id=str(media_task.uploader_id),
+                    media_id=str(media_task.id),
+                    status=MediaStatus.PROCESSING.value,
+                    worker=name,
+                )
+
                 await session.commit()
 
-                # --- PHASE 2: AI PROCESSING (Simulation) ---
                 await asyncio.sleep(20)
 
                 media_task.status = MediaStatus.READY
@@ -71,6 +103,15 @@ async def ai_worker_process(name: str):
                         tasks_processed_today=AIWorkerState.tasks_processed_today + 1,
                     )
                 )
+
+                insert_log = MediaLog(
+                    media_id=media_task.id,
+                    status=MediaStatus.READY,
+                    worker=name,
+                    timestamp=datetime.now(timezone.utc),
+                )
+                session.add(insert_log)
+
                 await session.commit()
 
             except Exception as e:

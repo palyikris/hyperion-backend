@@ -37,3 +37,33 @@ async def get_current_user(request: Request, db: AsyncSession = Depends(get_db))
     if user is None:
         raise HTTPException(status_code=401, detail="User not found")
     return user
+
+
+async def get_current_user_from_token(
+    token: str = Depends(lambda: None), db: AsyncSession = Depends(get_db)
+):
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated"
+        )
+
+    try:
+        payload = jwt.decode(token, SECRET_KEY or "", algorithms=[ALGORITHM])
+        email: str = payload.get("sub") or ""
+        if email is None:
+            raise HTTPException(status_code=401, detail="Invalid token")
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Token expired or invalid")
+
+    blacklist_result = await db.execute(
+        select(TokenBlacklist).where(TokenBlacklist.token == token)
+    )
+    if blacklist_result.scalar_one_or_none():
+        raise HTTPException(status_code=401, detail="Token has been revoked")
+
+    result = await db.execute(select(User).where(User.email == email))
+    user = result.scalar_one_or_none()
+
+    if user is None:
+        raise HTTPException(status_code=401, detail="User not found")
+    return user
