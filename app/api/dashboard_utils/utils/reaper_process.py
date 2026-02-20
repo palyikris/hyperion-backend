@@ -25,7 +25,7 @@ async def _build_pending_timeout_detail(session, media_id):
         if "UPLOADED" in normalized_log:
             inferred_step = "during status persistence after HF upload"
         elif "PENDING" in normalized_log:
-            inferred_step = "during HF upload transfer"
+            inferred_step = "during upload transfer"
         elif "FAILED" in normalized_log:
             inferred_step = "while recovering from previous failure"
         else:
