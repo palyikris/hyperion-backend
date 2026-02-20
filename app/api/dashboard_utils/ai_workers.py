@@ -10,155 +10,57 @@ import time
 
 from datetime import datetime, timezone, date
 
-# A shared queue for all workers
-task_queue = asyncio.Queue()
-
 router = APIRouter()
 
-worker_registry = {
-    "Helios": {
-        "last_ping": time.time(),
-        "activity": "Idle",
-        "tasks_processed_today": 0,
-        "current_task_id": None,
-        "last_reset_date": date.today(),
-    },
-    "Eos": {
-        "last_ping": time.time(),
-        "activity": "Idle",
-        "tasks_processed_today": 0,
-        "current_task_id": None,
-        "last_reset_date": date.today(),
-    },
-    "Aethon": {
-        "last_ping": time.time(),
-        "activity": "Idle",
-        "tasks_processed_today": 0,
-        "current_task_id": None,
-        "last_reset_date": date.today(),
-    },
-    "Crius": {
-        "last_ping": time.time(),
-        "activity": "Idle",
-        "tasks_processed_today": 0,
-        "current_task_id": None,
-        "last_reset_date": date.today(),
-    },
-    "Iapetus": {
-        "last_ping": time.time(),
-        "activity": "Idle",
-        "tasks_processed_today": 0,
-        "current_task_id": None,
-        "last_reset_date": date.today(),
-    },
-    "Perses": {
-        "last_ping": time.time(),
-        "activity": "Idle",
-        "tasks_processed_today": 0,
-        "current_task_id": None,
-        "last_reset_date": date.today(),
-    },
-    "Phlegon": {
-        "last_ping": time.time(),
-        "activity": "Idle",
-        "tasks_processed_today": 0,
-        "current_task_id": None,
-        "last_reset_date": date.today(),
-    },
-    "Phoebe": {
-        "last_ping": time.time(),
-        "activity": "Idle",
-        "tasks_processed_today": 0,
-        "current_task_id": None,
-        "last_reset_date": date.today(),
-    },
-    "Theia": {
-        "last_ping": time.time(),
-        "activity": "Idle",
-        "tasks_processed_today": 0,
-        "current_task_id": None,
-        "last_reset_date": date.today(),
-    },
-    "Cronus": {
-        "last_ping": time.time(),
-        "activity": "Idle",
-        "tasks_processed_today": 0,
-        "current_task_id": None,
-        "last_reset_date": date.today(),
-    },
-}
-
-
-async def ai_worker_process(name: str):
-    while True:
-        worker_registry[name]["last_ping"] = time.time()
-
-        # Reset daily counter if it's a new day
-        today = date.today()
-        if worker_registry[name].get("last_reset_date") != today:
-            worker_registry[name]["tasks_processed_today"] = 0
-            worker_registry[name]["last_reset_date"] = today
-
-        try:
-            task = await asyncio.wait_for(task_queue.get(), timeout=1.0)
-
-            worker_registry[name]["activity"] = "Working"
-            worker_registry[name]["current_task_id"] = task.get("id")
-
-            # simulate AI workload
-            await asyncio.sleep(25)
-
-            worker_registry[name]["activity"] = "Idle"
-            worker_registry[name]["current_task_id"] = None
-            worker_registry[name]["tasks_processed_today"] += 1
-            task_queue.task_done()
-
-        except asyncio.TimeoutError:
-            # no task
-            worker_registry[name]["activity"] = "Idle"
-            worker_registry[name]["current_task_id"] = None
-            continue
-
-
-def get_node_status(node_data: dict):
-    last_ping = node_data.get("last_ping", 0)
-    activity = node_data.get("activity", "Idle")
-
-    seconds_since_ping = time.time() - last_ping
-
-    if last_ping == 0 or seconds_since_ping > 120:
-        return "Offline"
-
-    if activity == "Working":
-        return "Working"
-
-    return "Active"
+from sqlalchemy import select
+from app.database import get_db  #
+from app.models.db.AIWorker import AIWorkerState
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.models.db.Media import Media
+from app.api.dashboard_utils.utils.get_queue_depth import get_queue_depth
 
 
 @router.get(
     "/ai-workers",
     status_code=status.HTTP_200_OK,
-    response_model=AIWorkersResponse,
+    response_model=AIWorkersResponse,  #
 )
-async def get_worker_status(current_user=Depends(get_current_user)):
+async def get_worker_status(
+    db: AsyncSession = Depends(get_db), current_user=Depends(get_current_user)  #  #
+):
+    result = await db.execute(select(AIWorkerState))
+    worker_records = result.scalars().all()
+
     nodes = []
     active_count = 0
     working_count = 0
 
-    for name, data in worker_registry.items():
-        status_label = get_node_status(data)
+    for worker in worker_records:
+        last_ping = worker.last_ping
+        if last_ping is None:
+            is_online = False
+        else:
+            if last_ping.tzinfo is None:
+                last_ping = last_ping.replace(tzinfo=timezone.utc)
+            is_online = (datetime.now(timezone.utc) - last_ping).total_seconds() < 120
+        status_label = worker.status if is_online else "Offline"
 
         if status_label in ["Active", "Working"]:
             active_count += 1
         if status_label == "Working":
             working_count += 1
 
+        worker_tasks = await db.execute(
+            select(Media).where(Media.assigned_worker == worker.name)
+        )
+        current_task = worker_tasks.scalars().first()
+
         nodes.append(
             {
-                "name": name,
+                "name": worker.name,
                 "status": status_label,
-                "tasks_processed_today": data.get("tasks_processed_today", 0),
-                "current_task_id": data.get("current_task_id"),
+                "tasks_processed_today": worker.tasks_processed_today,
+                "current_task_id": str(current_task.id) if current_task else None,
             }
         )
 
@@ -170,33 +72,6 @@ async def get_worker_status(current_user=Depends(get_current_user)):
             else "Optimal" if active_count >= 3 else "Degraded"
         ),
         "nodes": nodes,
-        "queue_depth": task_queue.qsize(),
+        "queue_depth": await get_queue_depth(db),  #
         "last_updated": datetime.now(timezone.utc).isoformat(),
     }
-
-
-@router.post("/ai-workers/dispatch")
-async def dispatch_simulation(
-    action: str = "Generic AI Task", current_user=Depends(get_current_user)
-):
-    """
-    Manually injects a task into the fleet's queue.
-    """
-    task_id = str(uuid.uuid4())[:8]
-    task = {"id": task_id, "action": action, "timestamp": time.time()}
-
-    await task_queue.put(task)
-
-    return {
-        "message": f"Task {task_id} dispatched to the Titan fleet.",
-        "action": action,
-        "queue_size": task_queue.qsize(),
-    }
-
-
-async def start_worker_fleet():
-    """
-    starts the loop
-    """
-    for name in worker_registry.keys():
-        asyncio.create_task(ai_worker_process(name))

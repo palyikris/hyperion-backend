@@ -8,7 +8,7 @@ from app.api import system
 from app.api import dashboard
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.dashboard_utils.ux import track_ux_metrics
-from app.api.dashboard_utils.ai_workers import start_worker_fleet
+from app.api.dashboard_utils.utils.init_workers import initialize_worker_fleet
 import os
 
 # media, stats
@@ -47,7 +47,7 @@ async def middleware(request, call_next):
 
 @app.on_event("startup")
 async def on_startup():
-    await start_worker_fleet()
+    await initialize_worker_fleet()
 
 
 # Public Routes
