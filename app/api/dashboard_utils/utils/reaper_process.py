@@ -4,9 +4,38 @@ from sqlalchemy import select, update, or_
 from app.database import AsyncSessionLocal
 from app.api.media_log_utils import create_status_change_log
 from app.models.db.Media import Media
+from app.models.db.MediaLog import MediaLog
 from app.models.db.AIWorker import AIWorkerState
 from app.models.upload.MediaStatus import MediaStatus
 from app.api.upload_utils.conn_manager import worker_signal, manager
+
+
+async def _build_pending_timeout_detail(session, media_id):
+    latest_log_result = await session.execute(
+        select(MediaLog.message)
+        .where(MediaLog.media_id == media_id)
+        .order_by(MediaLog.timestamp.desc())
+        .limit(1)
+    )
+    latest_log = latest_log_result.scalar_one_or_none()
+
+    inferred_step = "during HF upload transfer"
+    if latest_log:
+        normalized_log = latest_log.upper()
+        if "UPLOADED" in normalized_log:
+            inferred_step = "during status persistence after HF upload"
+        elif "PENDING" in normalized_log:
+            inferred_step = "during HF upload transfer"
+        elif "FAILED" in normalized_log:
+            inferred_step = "while recovering from previous failure"
+        else:
+            inferred_step = "at unknown pipeline step"
+
+    if latest_log:
+        return (
+            f"reaper pending timeout: failed {inferred_step} (last log: {latest_log})"
+        )
+    return f"reaper pending timeout: failed {inferred_step}"
 
 
 async def ai_reaper_process():
@@ -45,10 +74,13 @@ async def ai_reaper_process():
                 stale_pending_tasks = stale_pending_query.scalars().all()
 
                 for task in stale_pending_tasks:
+                    failure_detail = await _build_pending_timeout_detail(
+                        session, task.id
+                    )
                     failure_log = create_status_change_log(
                         media_id=task.id,
                         status=MediaStatus.FAILED,
-                        detail="reaper pending timeout",
+                        detail=failure_detail,
                     )
                     session.add(failure_log)
 

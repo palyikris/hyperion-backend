@@ -15,6 +15,8 @@ router = APIRouter()
 from sqlalchemy import select
 from app.database import get_db  #
 from app.models.db.AIWorker import AIWorkerState
+from app.models.db.Media import Media
+from app.models.upload.MediaStatus import MediaStatus
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.db.Media import Media
 from app.api.dashboard_utils.utils.get_queue_depth import get_queue_depth
@@ -51,7 +53,10 @@ async def get_worker_status(
             working_count += 1
 
         worker_tasks = await db.execute(
-            select(Media).where(Media.assigned_worker == worker.name)
+            select(Media).where(
+                Media.assigned_worker == worker.name,
+                Media.status.in_([MediaStatus.EXTRACTING, MediaStatus.PROCESSING]),
+            )
         )
         current_task = worker_tasks.scalars().first()
 

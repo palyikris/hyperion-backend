@@ -1,6 +1,6 @@
 import asyncio
 from datetime import datetime, timezone, date
-from sqlalchemy import select, update, insert
+from sqlalchemy import select, update, or_
 from app.database import AsyncSessionLocal
 from app.api.media_log_utils import create_status_change_log
 from app.models.db.Media import Media
@@ -15,8 +15,23 @@ async def ai_worker_process(name: str):
     """
 
     while True:
+
         async with AsyncSessionLocal() as session:
             try:
+                today = date.today()
+
+                await session.execute(
+                    update(AIWorkerState)
+                    .where(AIWorkerState.name == name)
+                    .where(
+                        or_(
+                            AIWorkerState.last_reset_date.is_(None),
+                            AIWorkerState.last_reset_date != today,
+                        )
+                    )
+                    .values(tasks_processed_today=0, last_reset_date=today)
+                )
+
                 await session.execute(
                     update(AIWorkerState)
                     .where(AIWorkerState.name == name)
