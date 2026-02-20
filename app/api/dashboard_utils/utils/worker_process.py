@@ -5,9 +5,8 @@ from app.database import AsyncSessionLocal
 from app.models.db.Media import Media
 from app.models.db.AIWorker import AIWorkerState
 from app.models.upload.MediaStatus import MediaStatus
+from app.api.dashboard_utils.conn_manager import worker_signal
 
-
-worker_signal = asyncio.Condition()
 
 async def ai_worker_process(name: str):
     """
