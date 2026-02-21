@@ -97,13 +97,19 @@ async def batch_upload(
 @router.websocket("/ws/updates")
 async def websocket_updates(
     websocket: WebSocket,
-    token: str = Query(...),  # frontend sends: ws://.../ws/updates?token=JWT_HERE
+    token: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
+    auth_token = websocket.cookies.get("access_token") or token
+
+    if not auth_token:
+        await websocket.close(code=1008)
+        return
+
     try:
-        user = await get_current_user_from_token(token)
+        user = await get_current_user_from_token(token=auth_token, db=db)
     except Exception:
-        await websocket.close(code=401)
+        await websocket.close(code=1008)
         return
 
     await manager.connect(user.id, websocket)
