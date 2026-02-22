@@ -23,6 +23,8 @@ from fastapi.responses import JSONResponse
 from fastapi import HTTPException, status
 from app.models.upload.UploadResponse import UploadResponse
 from app.api.upload_utils.hf_upload import process_hf_upload
+from sqlalchemy import select
+
 
 router = APIRouter()
 
@@ -92,6 +94,31 @@ async def batch_upload(
         },
         status_code=status.HTTP_201_CREATED,
     )
+
+
+@router.get("/recents", status_code=status.HTTP_200_OK)
+async def get_recents(
+    db: AsyncSession = Depends(get_db), current_user=Depends(get_current_user)
+):
+    result = await db.execute(
+        select(Media)
+        .where(Media.uploader_id == current_user.id)
+        .order_by(Media.created_at.desc())
+        .limit(4)
+    )
+    recent_media = result.scalars().all()
+
+    return [
+        {
+            "id": str(media.id),
+            "filename": media.initial_metadata.get("filename"),
+            "status": media.status.value,
+            "timestamp": media.created_at.isoformat(),
+            "image_url": media.hf_path,
+            "metadata": media.initial_metadata,
+        }
+        for media in recent_media
+    ]
 
 
 @router.websocket("/ws/updates")
