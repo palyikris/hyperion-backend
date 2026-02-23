@@ -7,6 +7,7 @@ from app.api import auth
 from app.api import system
 from app.api import dashboard
 from app.api import upload
+from app.api import vault
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.dashboard_utils.ux import track_ux_metrics
 from app.api.dashboard_utils.utils.init_workers import initialize_worker_fleet
@@ -56,6 +57,7 @@ app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(system.router, prefix="/api", tags=["System"])
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["Dashboard"])
 app.include_router(upload.router, prefix="/api/upload", tags=["Media Upload"])
+app.include_router(vault.router, prefix="/api", tags=["Media Vault"])
 
 # protected Routes
 # app.include_router(media.router, prefix="/media", tags=["Media Operations"])
