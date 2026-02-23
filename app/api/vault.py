@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, status, HTTPException
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc, asc
 from typing import Optional, List
@@ -56,17 +57,42 @@ async def get_media_vault(
     result = await db.execute(query)
     records = result.scalars().all()
 
-    return [
-        {
-            "id": str(m.id),
-            "filename": m.initial_metadata.get("filename"),
-            "status": m.status.value,
-            "image_url": m.hf_path,
-            "timestamp": m.created_at.isoformat(),
-            "updated_at": m.updated_at.isoformat(),
-            "assigned_worker": m.assigned_worker,
-            "metadata": m.initial_metadata,
-            "technical_metadata": m.technical_metadata,
+    return JSONResponse(
+        content={
+            "total": len(records),
+            "items": [
+                {
+                    "id": str(media.id),
+                    "filename": media.initial_metadata.get("filename"),
+                    "status": media.status.value,
+                    "created_at": media.created_at.isoformat(),
+                }
+                for media in records
+            ],
         }
-        for m in records
-    ]
+    )
+
+
+@router.delete("/vault/{id}", status_code=status.HTTP_200_OK)
+async def delete_media(
+    id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """
+    Delete a media item from the user's vault.
+    """
+    query = select(Media).where(Media.id == id, Media.uploader_id == current_user.id)
+    result = await db.execute(query)
+    media = result.scalar_one_or_none()
+
+    if not media:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Media not found or you don't have permission to delete it",
+        )
+
+    await db.delete(media)
+    await db.commit()
+
+    return JSONResponse(content={"detail": "Media deleted successfully"})
