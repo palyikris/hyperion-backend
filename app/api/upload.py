@@ -21,7 +21,7 @@ import io
 import uuid
 from fastapi.responses import JSONResponse
 from fastapi import HTTPException, status
-from app.models.upload.UploadResponse import UploadResponse
+from app.models.upload.UploadResponse import UploadResponse, RecentsResponse
 from app.api.upload_utils.hf_upload import process_hf_upload
 from sqlalchemy import select
 
@@ -96,7 +96,11 @@ async def batch_upload(
     )
 
 
-@router.get("/recents", status_code=status.HTTP_200_OK)
+@router.get(
+    "/recents",
+    status_code=status.HTTP_200_OK,
+    response_model=RecentsResponse,
+)
 async def get_recents(
     db: AsyncSession = Depends(get_db), current_user=Depends(get_current_user)
 ):
@@ -108,17 +112,22 @@ async def get_recents(
     )
     recent_media = result.scalars().all()
 
-    return [
-        {
-            "id": str(media.id),
-            "filename": media.initial_metadata.get("filename"),
-            "status": media.status.value,
-            "timestamp": media.created_at.isoformat(),
-            "image_url": media.hf_path,
-            "metadata": media.initial_metadata,
+    return JSONResponse(
+        content={
+            "total": len(recent_media),
+            "items": [
+                {
+                    "id": str(media.id),
+                    "filename": media.initial_metadata.get("filename"),
+                    "status": media.status.value,
+                    "timestamp": media.created_at.isoformat(),
+                    "image_url": media.hf_path,
+                    "metadata": media.initial_metadata,
+                }
+                for media in recent_media
+            ],
         }
-        for media in recent_media
-    ]
+    )
 
 
 @router.websocket("/ws/updates")

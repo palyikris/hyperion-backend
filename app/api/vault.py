@@ -8,11 +8,16 @@ from app.database import get_db
 from app.api.deps import get_current_user
 from app.models.db.Media import Media
 from app.models.upload.MediaStatus import MediaStatus
+from app.models.vault.VaultResponse import VaultResponse
 
 router = APIRouter()
 
 
-@router.get("/vault", status_code=status.HTTP_200_OK)
+@router.get(
+    "/vault",
+    status_code=status.HTTP_200_OK,
+    response_model=VaultResponse,
+)
 async def get_media_vault(
     search: Optional[str] = Query(
         None, description="Search by filename within metadata"

@@ -1,20 +1,19 @@
 from pydantic import BaseModel
 from typing import List, Optional
 
-class UploadResponse(BaseModel):
-    message: str
-    media_ids: Optional[List[str]] = None
 
-
-class RecentMediaItem(BaseModel):
+class VaultItem(BaseModel):
     id: str
     filename: Optional[str] = None
     status: str
     timestamp: str
     image_url: Optional[str] = None
     metadata: Optional[dict] = None
-
-
-class RecentsResponse(BaseModel):
+    assigned_worker: Optional[str] = None
+    technical_metadata: Optional[dict] = None
+    updated_at: Optional[str] = None
+    
+    
+class VaultResponse(BaseModel):
     total: int
-    items: List[RecentMediaItem]
+    items: List[VaultItem]
