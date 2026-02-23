@@ -66,6 +66,9 @@ async def get_worker_status(
                 "status": status_label,
                 "tasks_processed_today": worker.tasks_processed_today,
                 "current_task_id": str(current_task.id) if current_task else None,
+                "current_task_status": (
+                    current_task.status.value if current_task else None
+                ),
             }
         )
 

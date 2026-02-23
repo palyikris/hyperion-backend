@@ -6,6 +6,7 @@ class NodeInfo(BaseModel):
     name: str
     tasks_processed_today: int
     current_task_id: Optional[str] = None
+    current_task_status: Optional[str] = None
 
 class AIWorkersResponse(BaseModel):
     total_active_fleet: int
