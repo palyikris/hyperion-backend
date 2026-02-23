@@ -12,12 +12,12 @@ from app.api.upload_utils.conn_manager import worker_signal, manager
 async def ai_worker_process(name: str):
     """
     Persistent background loop for a specific Titan worker.
+    Javított verzió: kiküszöböli a holtpontokat és a szálak leállását.
     """
 
     while True:
-
-        async with AsyncSessionLocal() as session:
-            try:
+        try:
+            async with AsyncSessionLocal() as session:
                 today = date.today()
 
                 await session.execute(
@@ -46,65 +46,86 @@ async def ai_worker_process(name: str):
                     .order_by(Media.created_at.asc())
                     .limit(1)
                     .with_for_update(skip_locked=True)
-                ) # find oldest uploaded that isnt assigned
+                )
 
                 result = await session.execute(task_query)
                 media_task = result.scalar_one_or_none()
 
                 if not media_task:
-                    async with worker_signal:
-                        await worker_signal.wait()
-                    continue
+                    media_task_id = None
+                    uploader_id = None
+                else:
+                    media_task_id = media_task.id
+                    uploader_id = media_task.uploader_id
 
-                # --- PHASE 1: EXTRACTION (Simulation) ---
-                media_task.status = MediaStatus.EXTRACTING
-                media_task.assigned_worker = name
+                    media_task.status = MediaStatus.EXTRACTING
+                    media_task.assigned_worker = name
 
-                insert_log = create_status_change_log(
-                    media_id=media_task.id,
-                    status=MediaStatus.EXTRACTING,
-                    worker_name=name,
+                    session.add(
+                        create_status_change_log(
+                            media_id=media_task.id,
+                            status=MediaStatus.EXTRACTING,
+                            worker_name=name,
+                        )
+                    )
+
+                    await session.execute(
+                        update(AIWorkerState)
+                        .where(AIWorkerState.name == name)
+                        .values(status="Working")
+                    )
+                    await session.commit()
+
+            if not media_task_id:
+                async with worker_signal:
+                    try:
+                        # 60 sec timeout: if no new task, update worker status
+                        await asyncio.wait_for(worker_signal.wait(), timeout=60)
+                    except asyncio.TimeoutError:
+                        pass
+                continue
+
+            await manager.send_status(
+                user_id=str(uploader_id),
+                media_id=str(media_task_id),
+                status=MediaStatus.EXTRACTING.value,
+                worker=name,
+            )
+
+            await asyncio.sleep(5)
+
+            async with AsyncSessionLocal() as session:
+                res = await session.execute(
+                    select(Media).where(Media.id == media_task_id)
                 )
-                session.add(insert_log)
+                task = res.scalar_one()
+                task.status = MediaStatus.PROCESSING
 
-                await manager.send_status(
-                    user_id=str(media_task.uploader_id),
-                    media_id=str(media_task.id),
-                    status=MediaStatus.EXTRACTING.value,
-                    worker=name,
-                )
-
-                await session.execute(
-                    update(AIWorkerState)
-                    .where(AIWorkerState.name == name)
-                    .values(status="Working")
+                session.add(
+                    create_status_change_log(
+                        media_id=task.id,
+                        status=MediaStatus.PROCESSING,
+                        worker_name=name,
+                    )
                 )
                 await session.commit()
 
-                await asyncio.sleep(5)
+            await manager.send_status(
+                user_id=str(uploader_id),
+                media_id=str(media_task_id),
+                status=MediaStatus.PROCESSING.value,
+                worker=name,
+            )
 
-                # --- PHASE 2: AI PROCESSING (Simulation) ---
-                media_task.status = MediaStatus.PROCESSING
+            await asyncio.sleep(20)
 
-                insert_log = create_status_change_log(
-                    media_id=media_task.id,
-                    status=MediaStatus.PROCESSING,
-                    worker_name=name,
+            # --- FINALIZE: READY ---
+            async with AsyncSessionLocal() as session:
+                res = await session.execute(
+                    select(Media).where(Media.id == media_task_id)
                 )
-                session.add(insert_log)
-
-                await manager.send_status(
-                    user_id=str(media_task.uploader_id),
-                    media_id=str(media_task.id),
-                    status=MediaStatus.PROCESSING.value,
-                    worker=name,
-                )
-
-                await session.commit()
-
-                await asyncio.sleep(20)
-
-                media_task.status = MediaStatus.READY
+                task = res.scalar_one()
+                task.status = MediaStatus.READY
 
                 await session.execute(
                     update(AIWorkerState)
@@ -114,17 +135,15 @@ async def ai_worker_process(name: str):
                         tasks_processed_today=AIWorkerState.tasks_processed_today + 1,
                     )
                 )
-
-                insert_log = create_status_change_log(
-                    media_id=media_task.id,
-                    status=MediaStatus.READY,
-                    worker_name=name,
+                session.add(
+                    create_status_change_log(
+                        media_id=task.id,
+                        status=MediaStatus.READY,
+                        worker_name=name,
+                    )
                 )
-                session.add(insert_log)
-
                 await session.commit()
 
-            except Exception as e:
-                print(f"Worker {name} encountered an error: {e}")
-                await session.rollback()
-                await asyncio.sleep(10)
+        except Exception as e:
+            print(f"Worker {name} encountered an error: {e}")
+            await asyncio.sleep(10)
