@@ -64,6 +64,7 @@ async def process_hf_upload(
                     media_id=str(m_id),
                     status=MediaStatus.UPLOADED.value,
                     worker=None,
+                    img_url=hf_path,
                 )
 
                 await session.commit()
