@@ -9,7 +9,7 @@ class MediaLog(Base):
     __tablename__ = "media_task_logs"
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
-    media_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("media.id"), nullable=False)
+    media_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("media.id", ondelete="CASCADE"), nullable=False)
     worker_name: Mapped[str] = mapped_column(String, nullable=True)
 
     action: Mapped[str] = mapped_column(String, nullable=False)  # e.g., "STATUS_CHANGE"
