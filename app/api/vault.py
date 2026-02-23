@@ -65,7 +65,9 @@ async def get_media_vault(
                     "id": str(media.id),
                     "filename": media.initial_metadata.get("filename"),
                     "status": media.status.value,
-                    "created_at": media.created_at.isoformat(),
+                    "timestamp": media.created_at.isoformat(),
+                    "metadata": media.initial_metadata,
+                    "assigned_worker": media.assigned_worker,
                 }
                 for media in records
             ],
