@@ -27,8 +27,8 @@ async def get_media_vault(
         "created_at", description="Sort field: created_at, filename, or status"
     ),
     direction: str = Query("desc", regex="^(asc|desc)$"),
-    limit: int = Query(20, ge=1, le=100),
-    offset: int = Query(0, ge=0),
+    page: int = Query(1, ge=1, description="Page number (1-indexed)"),
+    page_size: int = Query(20, ge=1, le=100, description="Number of items per page"),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -57,14 +57,29 @@ async def get_media_vault(
     else:
         query = query.order_by(asc(sort_column))
 
-    query = query.offset(offset).limit(limit)
+    offset = (page - 1) * page_size
+
+    count_query = select(Media).where(Media.uploader_id == current_user.id)
+    if status_filter:
+        count_query = count_query.where(Media.status == status_filter)
+    if search:
+        count_query = count_query.where(
+            Media.initial_metadata["filename"].as_string().ilike(f"%{search}%")
+        )
+    count_result = await db.execute(count_query)
+    total = len(count_result.scalars().all())
+
+    query = query.offset(offset).limit(page_size)
 
     result = await db.execute(query)
     records = result.scalars().all()
 
     return JSONResponse(
         content={
-            "total": len(records),
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": (total + page_size - 1) // page_size,
             "items": [
                 {
                     "id": str(media.id),
@@ -79,6 +94,36 @@ async def get_media_vault(
                 }
                 for media in records
             ],
+        }
+    )
+
+
+@router.delete("/vault/all", status_code=status.HTTP_200_OK)
+async def delete_all_media(
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """
+    Delete all media items from the user's vault.
+    """
+    query = select(Media).where(Media.uploader_id == current_user.id)
+    result = await db.execute(query)
+    media_items = result.scalars().all()
+
+    if not media_items:
+        return JSONResponse(
+            content={"detail": "No media found to delete", "deleted_count": 0}
+        )
+
+    for media in media_items:
+        await db.delete(media)
+
+    await db.commit()
+
+    return JSONResponse(
+        content={
+            "detail": "All media deleted successfully",
+            "deleted_count": len(media_items),
         }
     )
 
