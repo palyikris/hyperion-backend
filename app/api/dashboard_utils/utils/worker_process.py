@@ -7,7 +7,9 @@ from app.models.db.Media import Media
 from app.models.db.AIWorker import AIWorkerState
 from app.models.upload.MediaStatus import MediaStatus
 from app.api.upload_utils.conn_manager import worker_signal, manager
-
+from huggingface_hub import hf_hub_download
+import os
+from app.api.upload_utils.metadata_extractor import extract_media_metadata
 
 async def ai_worker_process(name: str):
     """
@@ -93,7 +95,6 @@ async def ai_worker_process(name: str):
             if not media_task_id:
                 async with worker_signal:
                     try:
-                        # 60 sec timeout: if no new task, update worker status
                         await asyncio.wait_for(worker_signal.wait(), timeout=60)
                     except asyncio.TimeoutError:
                         pass
@@ -106,23 +107,89 @@ async def ai_worker_process(name: str):
                 worker=name,
             )
 
-            await asyncio.sleep(5)
+            extraction_ok = False
+            local_file_path = None
+            try:
+                hf_repo_id = os.getenv("HF_REPO_ID")
+                hf_token = os.getenv("HF_TOKEN")
 
-            async with AsyncSessionLocal() as session:
-                res = await session.execute(
-                    select(Media).where(Media.id == media_task_id)
-                )
-                task = res.scalar_one()
-                task.status = MediaStatus.PROCESSING
-
-                session.add(
-                    create_status_change_log(
-                        media_id=task.id,
-                        status=MediaStatus.PROCESSING,
-                        worker_name=name,
+                if not hf_repo_id or not hf_token:
+                    raise ValueError(
+                        "HF_REPO_ID or HF_TOKEN environment variables are not set"
                     )
+
+                if not media_task or not media_task.hf_path:
+                    raise ValueError(f"Media task {media_task_id} is missing hf_path")
+
+                local_file_path = await asyncio.to_thread(
+                    hf_hub_download,
+                    repo_id=hf_repo_id,
+                    filename=media_task.hf_path,
+                    repo_type="dataset",
+                    token=hf_token,
                 )
-                await session.commit()
+
+                with open(local_file_path, "rb") as f:
+                    file_bytes = f.read()
+
+                technical_meta = await asyncio.to_thread(extract_media_metadata, file_bytes)
+
+                async with AsyncSessionLocal() as session:
+                    await session.execute(
+                        update(Media)
+                        .where(Media.id == media_task_id)
+                        .values(
+                            status=MediaStatus.PROCESSING,
+                            technical_metadata=technical_meta,
+                        )
+                    )
+                    session.add(
+                        create_status_change_log(
+                            media_id=media_task_id,
+                            status=MediaStatus.PROCESSING,
+                            worker_name=name,
+                            detail="Extracted EXIF and GPS data",
+                        )
+                    )
+                    await session.commit()
+
+                extraction_ok = True
+            except Exception as e:
+                print(f"Extraction Error for {media_task_id}: {e}")
+                async with AsyncSessionLocal() as session:
+                    await session.execute(
+                        update(Media)
+                        .where(Media.id == media_task_id)
+                        .values(status=MediaStatus.FAILED)
+                    )
+                    session.add(
+                        create_status_change_log(
+                            media_id=media_task_id,
+                            status=MediaStatus.FAILED,
+                            worker_name=name,
+                            detail=f"Extraction failed: {e}",
+                        )
+                    )
+                    await session.execute(
+                        update(AIWorkerState)
+                        .where(AIWorkerState.name == name)
+                        .values(status="Active")
+                    )
+                    await session.commit()
+
+                await manager.send_status(
+                    user_id=str(uploader_id),
+                    media_id=str(media_task_id),
+                    status=MediaStatus.FAILED.value,
+                    worker=name,
+                )
+            finally:
+                if local_file_path and os.path.exists(local_file_path):
+                    os.remove(local_file_path)
+
+            if not extraction_ok:
+                await asyncio.sleep(5)
+                continue
 
             await manager.send_status(
                 user_id=str(uploader_id),
@@ -133,7 +200,6 @@ async def ai_worker_process(name: str):
 
             await asyncio.sleep(20)
 
-            # --- FINALIZE: READY ---
             async with AsyncSessionLocal() as session:
                 res = await session.execute(
                     select(Media).where(Media.id == media_task_id)
