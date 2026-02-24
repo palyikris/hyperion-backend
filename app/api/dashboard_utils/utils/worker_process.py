@@ -12,11 +12,25 @@ from app.api.upload_utils.conn_manager import worker_signal, manager
 async def ai_worker_process(name: str):
     """
     Persistent background loop for a specific Titan worker.
-    Javított verzió: kiküszöböli a holtpontokat és a szálak leállását.
     """
 
     while True:
         try:
+
+            if manager.is_hf_rate_limited():
+                async with AsyncSessionLocal() as session:
+                    await session.execute(
+                        update(AIWorkerState)
+                        .where(AIWorkerState.name == name)
+                        .values(
+                            last_ping=datetime.now(timezone.utc),
+                            status="Paused (Rate Limited)",
+                        )
+                    )
+                    await session.commit()
+                await asyncio.sleep(300)
+                continue
+
             async with AsyncSessionLocal() as session:
                 today = date.today()
 

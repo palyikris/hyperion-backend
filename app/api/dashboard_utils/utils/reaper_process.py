@@ -46,6 +46,10 @@ async def ai_reaper_process():
         # run every 10 minutes
         await asyncio.sleep(600)
 
+        if manager.is_hf_rate_limited():
+            await asyncio.sleep(300)
+            continue
+
         async with AsyncSessionLocal() as session:
             try:
                 now = datetime.now(timezone.utc)

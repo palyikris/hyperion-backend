@@ -27,6 +27,21 @@ async def process_hf_upload(
 
     async with AsyncSessionLocal() as session:
         for m_id, filename, content in files_data:
+
+            if manager.is_hf_rate_limited():
+                error_msg = "Skipped: Hugging Face rate limit active. Retry in 1 hour."
+                await session.execute(
+                    update(Media)
+                    .where(Media.id == m_id)
+                    .values(status=MediaStatus.FAILED)
+                )
+                session.add(
+                    create_status_change_log(m_id, MediaStatus.FAILED, detail=error_msg)
+                )
+                await manager.send_status(user_id, str(m_id), MediaStatus.FAILED.value)
+                await session.commit()
+                continue
+
             # prevents directory bloat in the HF repository.
             hf_path = f"media/{user_id}/{date_str}/{m_id}_{filename}"
 
@@ -74,10 +89,20 @@ async def process_hf_upload(
                     worker_signal.notify_all()
 
             except Exception as e:
+
+                if "429" in str(e) or "Too Many Requests" in str(e):
+                    manager.set_hf_cooldown(1)  # Set 1 hour cooldown
+                    detail = "Rate limit exceeded (128 commits/hr). Workers paused for 1 hour."
+                else:
+                    detail = str(e)
+
                 await session.execute(
                     update(Media)
                     .where(Media.id == m_id)
                     .values(status=MediaStatus.FAILED)
                 )
+                session.add(
+                    create_status_change_log(m_id, MediaStatus.FAILED, detail=detail)
+                )
+                await manager.send_status(user_id, str(m_id), MediaStatus.FAILED.value)
                 await session.commit()
-                print(f"HF Upload Error for {m_id}: {e}")

@@ -1,7 +1,7 @@
 import asyncio
 from typing import Dict
 from fastapi import WebSocket
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 
@@ -11,6 +11,7 @@ worker_signal = asyncio.Condition()
 class ConnectionManager:
     def __init__(self):
         self.active_connections: Dict[str, WebSocket] = {}
+        self.hf_cooldown_until: Optional[datetime] = None
 
     async def connect(self, user_id: str, websocket: WebSocket):
         await websocket.accept()
@@ -42,6 +43,16 @@ class ConnectionManager:
                 await websocket.send_json(payload)
             except Exception:
                 self.disconnect(user_id)
+
+    def is_hf_rate_limited(self) -> bool:
+        if self.hf_cooldown_until:
+            if datetime.now(timezone.utc) < self.hf_cooldown_until:
+                return True
+            self.hf_cooldown_until = None
+        return False
+
+    def set_hf_cooldown(self, hours: int = 1):
+        self.hf_cooldown_until = datetime.now(timezone.utc) + timedelta(hours=hours)
 
 
 manager = ConnectionManager()
