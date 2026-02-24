@@ -12,8 +12,11 @@ class VaultItem(BaseModel):
     assigned_worker: Optional[str] = None
     technical_metadata: Optional[dict] = None
     updated_at: Optional[str] = None
-    
-    
+
+
 class VaultResponse(BaseModel):
     total: int
+    page: int
+    page_size: int
+    total_pages: int
     items: List[VaultItem]
