@@ -144,6 +144,13 @@ async def ai_worker_process(name: str):
                 )
                 await session.commit()
 
+            await manager.send_status(
+                user_id=str(uploader_id),
+                media_id=str(media_task_id),
+                status=MediaStatus.READY.value,
+                worker=name,
+            )
+
         except Exception as e:
             print(f"Worker {name} encountered an error: {e}")
             await asyncio.sleep(10)
