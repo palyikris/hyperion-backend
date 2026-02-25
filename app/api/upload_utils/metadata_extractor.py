@@ -22,18 +22,18 @@ def extract_media_metadata(image_bytes: bytes):
         if not exif_data:
             return {"error": "No EXIF data found"}
 
-        # map tag IDs to human-readable names
-        readable_exif = {
-            ExifTags.TAGS.get(tag, tag): value
-            for tag, value in exif_data.items()
-            if tag in ExifTags.TAGS
-        }
+        exif_ifd = exif_data.get_ifd(0x8769)
+
+        # 36867 = DateTimeOriginal
+        # 36868 = DateTimeDigitized
+        # 306 = DateTime (módosítás dátuma)
+        date_taken = exif_ifd.get(36867) or exif_ifd.get(36868) or exif_data.get(306)
 
         tech_meta = {
-            "make": readable_exif.get("Make"),
-            "model": readable_exif.get("Model"),
-            "software": readable_exif.get("Software"),
-            "date_taken": readable_exif.get("DateTimeOriginal"),
+            "make": exif_data.get(271),
+            "model": exif_data.get(272),
+            "software": exif_data.get(305),
+            "date_taken": str(date_taken) if date_taken else None,
             "gps": None,
         }
 
