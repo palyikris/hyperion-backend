@@ -11,9 +11,36 @@ from app.api.upload_utils.conn_manager import worker_signal, manager
 from concurrent.futures import ThreadPoolExecutor
 import asyncio
 
-# Configuration from Environment
 HF_TOKEN = os.getenv("HF_TOKEN")
 HF_REPO_ID = os.getenv("HF_REPO_ID")
+
+
+async def delete_from_hf(hf_path: str) -> bool:
+    """
+    Delete a file from the Hugging Face dataset.
+
+    Args:
+        hf_path: The path of the file in the HF repo (e.g., media/user_id/date/filename)
+
+    Returns:
+        True if deletion succeeded, False otherwise
+    """
+    try:
+        api = HfApi(token=HF_TOKEN)
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None,
+            lambda: api.delete_file(
+                path_in_repo=hf_path,
+                repo_id=HF_REPO_ID or "",
+                repo_type="dataset",
+                commit_message=f"Delete media file {hf_path}",
+            ),
+        )
+        return True
+    except Exception as e:
+        print(f"Error deleting file from HF: {str(e)}")
+        return False
 
 
 async def process_hf_upload(

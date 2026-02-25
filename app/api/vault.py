@@ -9,6 +9,7 @@ from app.api.deps import get_current_user
 from app.models.db.Media import Media
 from app.models.upload.MediaStatus import MediaStatus
 from app.models.vault.VaultResponse import VaultResponse
+from app.api.upload_utils.hf_upload import delete_from_hf
 
 router = APIRouter()
 
@@ -104,7 +105,7 @@ async def delete_all_media(
     current_user=Depends(get_current_user),
 ):
     """
-    Delete all media items from the user's vault.
+    Delete all media items from the user's vault, including images from HF dataset.
     """
     query = select(Media).where(Media.uploader_id == current_user.id)
     result = await db.execute(query)
@@ -115,15 +116,21 @@ async def delete_all_media(
             content={"detail": "No media found to delete", "deleted_count": 0}
         )
 
+    deleted_count = 0
     for media in media_items:
+        # Delete from HF dataset if hf_path exists
+        if media.hf_path:
+            await delete_from_hf(media.hf_path)
+
         await db.delete(media)
+        deleted_count += 1
 
     await db.commit()
 
     return JSONResponse(
         content={
             "detail": "All media deleted successfully",
-            "deleted_count": len(media_items),
+            "deleted_count": deleted_count,
         }
     )
 
@@ -135,7 +142,7 @@ async def delete_media(
     current_user=Depends(get_current_user),
 ):
     """
-    Delete a media item from the user's vault.
+    Delete a media item from the user's vault, including the image from HF dataset.
     """
     query = select(Media).where(Media.id == id, Media.uploader_id == current_user.id)
     result = await db.execute(query)
@@ -146,6 +153,10 @@ async def delete_media(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Media not found or you don't have permission to delete it",
         )
+
+    # Delete from HF dataset if hf_path exists
+    if media.hf_path:
+        await delete_from_hf(media.hf_path)
 
     await db.delete(media)
     await db.commit()
