@@ -2,7 +2,7 @@ import os
 import uuid
 from datetime import datetime, timezone
 from sqlalchemy import update
-from huggingface_hub import HfApi
+from huggingface_hub import HfApi, CommitOperationAdd
 from app.database import AsyncSessionLocal
 from app.api.media_log_utils import create_status_change_log
 from app.models.db.Media import Media
@@ -42,66 +42,63 @@ async def delete_from_hf(hf_path: str) -> bool:
         print(f"Error deleting file from HF: {str(e)}")
         return False
 
-hf_semaphore = asyncio.Semaphore(5)
 
-
-async def upload_single_file(m_id, filename, content, user_id, date_str, api):
-    async with hf_semaphore:
-        if manager.is_hf_rate_limited():
-            await update_media_status(m_id, MediaStatus.FAILED, "HF Rate Limit reached")
-            await manager.send_status(user_id, str(m_id), "FAILED")
-            return False
-
-        try:
-            hf_path = f"media/{user_id}/{date_str}/{m_id}_{filename}"
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(
-                None,
-                lambda: api.upload_file(
-                    path_or_fileobj=content,
-                    path_in_repo=hf_path,
-                    repo_id=HF_REPO_ID,
-                    repo_type="dataset",
-                ),
-            )
-
-            await update_media_status(m_id, MediaStatus.UPLOADED, hf_path=hf_path)
-            await manager.send_status(user_id, str(m_id), "UPLOADED", img_url=hf_path)
-            return True
-
-        except Exception as e:
-            await update_media_status(m_id, MediaStatus.FAILED, f"Error: {str(e)}")
-            await manager.send_status(user_id, str(m_id), "FAILED")
-            return False
-
-
-async def update_media_status(m_id, status, log_message=None, hf_path=None):
-    async with AsyncSessionLocal() as session:
-        vals = {"status": status, "updated_at": datetime.now(timezone.utc)}
-        if hf_path:
-            vals["hf_path"] = hf_path
-
-        await session.execute(update(Media).where(Media.id == m_id).values(**vals))
-        if log_message:
-            session.add(create_status_change_log(m_id, status, log_message))
-        await session.commit()
-
-
-async def process_hf_upload(
-    files_data: list[tuple[uuid.UUID, str, bytes]], user_id: str
-):
-    """
-    Sequentially streams files to Hugging Face and notifies workers.
-    """
+async def process_hf_upload(files_data: list[tuple], user_id: str):
     api = HfApi(token=HF_TOKEN)
     date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
-    tasks = [
-        upload_single_file(m_id, fname, cont, user_id, date_str, api)
-        for m_id, fname, cont in files_data
-    ]
+    if not HF_REPO_ID:
+        raise ValueError("HF_REPO_ID environment variable is not set")
 
-    await asyncio.gather(*tasks)
+    operations = []
+    media_ids = []
 
-    async with worker_signal:
-        worker_signal.notify_all()
+    for m_id, filename, content in files_data:
+        hf_path = f"media/{user_id}/{date_str}/{m_id}_{filename}"
+
+        # registers file, but does not upload yet
+        operations.append(
+            CommitOperationAdd(path_in_repo=hf_path, path_or_fileobj=content)
+        )
+        media_ids.append((m_id, hf_path))
+
+    try:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None,
+            lambda: api.create_commit(
+                repo_id=HF_REPO_ID or "",
+                repo_type="dataset",
+                operations=operations,
+                commit_message=f"Batch upload {len(operations)} files for user {user_id}",
+            ),
+        )
+
+        async with AsyncSessionLocal() as session:
+            for m_id, hf_path in media_ids:
+                await session.execute(
+                    update(Media)
+                    .where(Media.id == m_id)
+                    .values(status=MediaStatus.UPLOADED, hf_path=hf_path)
+                )
+                session.add(create_status_change_log(m_id, MediaStatus.UPLOADED))
+                await manager.send_status(
+                    user_id, str(m_id), "UPLOADED", img_url=hf_path
+                )
+
+            await session.commit()
+
+        async with worker_signal:
+            worker_signal.notify_all()
+
+    except Exception as e:
+        async with AsyncSessionLocal() as session:
+            for m_id, _ in media_ids:
+                await session.execute(
+                    update(Media)
+                    .where(Media.id == m_id)
+                    .values(status=MediaStatus.FAILED)
+                )
+                await manager.send_status(user_id, str(m_id), "FAILED")
+            await session.commit()
+        print(f"Batch upload failed: {e}")
