@@ -135,13 +135,23 @@ async def ai_worker_process(name: str):
                 technical_meta = await asyncio.to_thread(extract_media_metadata, file_bytes)
 
                 async with AsyncSessionLocal() as session:
+                    # Prepare update values
+                    update_values = {
+                        "status": MediaStatus.PROCESSING,
+                        "technical_metadata": technical_meta,
+                    }
+
+                    if "error" not in technical_meta and technical_meta.get("gps"):
+                        gps_data = technical_meta["gps"]
+                        if isinstance(gps_data, dict):
+                            update_values["lat"] = gps_data.get("lat")
+                            update_values["lng"] = gps_data.get("lng")
+                            update_values["altitude"] = gps_data.get("altitude")
+
                     await session.execute(
                         update(Media)
                         .where(Media.id == media_task_id)
-                        .values(
-                            status=MediaStatus.PROCESSING,
-                            technical_metadata=technical_meta,
-                        )
+                        .values(**update_values)
                     )
                     session.add(
                         create_status_change_log(

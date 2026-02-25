@@ -37,6 +37,10 @@ class Media(Base):
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )
+    lat: Mapped[float | None] = mapped_column(nullable=True)
+    lng: Mapped[float | None] = mapped_column(nullable=True)
+    altitude: Mapped[float | None] = mapped_column(nullable=True)
+    address: Mapped[str | None] = mapped_column(String, nullable=True)
 
     # Relationships
     uploader = relationship("User", backref="uploads")
