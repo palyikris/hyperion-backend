@@ -27,6 +27,7 @@ class ConnectionManager:
         status: str,
         worker: Optional[str] = None,
         img_url: Optional[str] = None,
+        address: Optional[str] = None,
     ):
         """Sends a JSON packet to a specific user's dashboard."""
         if user_id in self.active_connections:
@@ -38,6 +39,7 @@ class ConnectionManager:
                 "worker": worker,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "img_url": img_url,
+                "address": address,
             }
             try:
                 await websocket.send_json(payload)

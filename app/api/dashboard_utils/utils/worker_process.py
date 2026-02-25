@@ -105,6 +105,7 @@ async def ai_worker_process(name: str):
                 media_id=str(media_task_id),
                 status=MediaStatus.EXTRACTING.value,
                 worker=name,
+                address=media_task.address if media_task else None,
             )
 
             extraction_ok = False
