@@ -123,6 +123,7 @@ async def get_recents(
                     "timestamp": media.created_at.isoformat(),
                     "image_url": media.hf_path,
                     "metadata": media.initial_metadata,
+                    "address": media.address,
                 }
                 for media in recent_media
             ],

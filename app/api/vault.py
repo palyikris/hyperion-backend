@@ -92,6 +92,10 @@ async def get_media_vault(
                     "image_url": media.hf_path,
                     "technical_metadata": media.technical_metadata,
                     "updated_at": media.updated_at.isoformat(),
+                    "lat": media.lat,
+                    "lng": media.lng,
+                    "altitude": media.altitude,
+                    "address": media.address,
                 }
                 for media in records
             ],
