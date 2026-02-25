@@ -1,5 +1,42 @@
 from PIL import Image, ExifTags
 import io
+import httpx
+import asyncio
+
+_address_cache = {}
+
+
+async def get_address_from_coords(lat, lon):
+    if lat is None or lon is None:
+        return None
+
+    # about 110m pecision at the equator, good enough for caching
+    cache_key = f"{round(lat, 3)},{round(lon, 3)}"
+    if cache_key in _address_cache:
+        return _address_cache[cache_key]
+
+    url = f"https://nominatim.openstreetmap.org/reverse?format=json&lat={lat}&lon={lon}"
+    headers = {"User-Agent": "Hyperion-App-Thesis"}
+
+    try:
+        # very strict OSM policy -> one req per sec
+        await asyncio.sleep(1.1)
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(url, headers=headers)
+            if resp.status_code == 200:
+                data = resp.json()
+                addr = data.get("address", {})
+                city = addr.get("city") or addr.get("town") or addr.get("village")
+                country = addr.get("country")
+                result = (
+                    f"{city}, {country}"
+                    if city and country
+                    else data.get("display_name")
+                )
+                _address_cache[cache_key] = result
+                return result
+    except Exception:
+        return None
 
 
 def get_decimal_from_dms(dms, ref):
@@ -53,7 +90,12 @@ def extract_media_metadata(image_bytes: bytes):
                 )
                 alt = float(gps_data.get("GPSAltitude", 0))
 
-                tech_meta["gps"] = {"lat": lat, "lng": lon, "altitude": alt}
+                tech_meta["gps"] = {
+                    "lat": lat,
+                    "lng": lon,
+                    "altitude": alt,
+                    "address": asyncio.run(get_address_from_coords(lat, lon)),
+                }
             except (KeyError, TypeError, ZeroDivisionError):
                 pass
 
