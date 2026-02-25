@@ -37,12 +37,12 @@ def extract_media_metadata(image_bytes: bytes):
             "gps": None,
         }
 
-        gps_info = readable_exif.get("GPSInfo")
-        if gps_info:
+        gps_ifd = exif_data.get_ifd(0x8825)  # GPSInfo IFD
+        if gps_ifd:
             gps_data = {}
-            for t in gps_info:
-                sub_tag = ExifTags.GPSTAGS.get(t, t)
-                gps_data[sub_tag] = gps_info[t]
+            for t, value in gps_ifd.items():
+                tag_name = ExifTags.GPSTAGS.get(t, t)
+                gps_data[tag_name] = value
 
             try:
                 lat = get_decimal_from_dms(
@@ -54,8 +54,8 @@ def extract_media_metadata(image_bytes: bytes):
                 alt = float(gps_data.get("GPSAltitude", 0))
 
                 tech_meta["gps"] = {"lat": lat, "lng": lon, "altitude": alt}
-            except KeyError:
-                pass  # missing critical GPS tags
+            except (KeyError, TypeError, ZeroDivisionError):
+                pass
 
         return tech_meta
     except Exception as e:
