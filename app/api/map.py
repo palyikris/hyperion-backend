@@ -48,7 +48,7 @@ async def get_map_data(
             Media.technical_metadata["has_trash"].as_boolean() == has_trash
         )
 
-    if min_confidence is not None:
+    if min_confidence is not None and min_confidence > 0:
         query = query.where(
             Media.technical_metadata["confidence"].as_float() >= min_confidence
         )
