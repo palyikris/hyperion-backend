@@ -62,7 +62,6 @@ app.include_router(vault.router, prefix="/api", tags=["Media Vault"])
 app.include_router(map.router, prefix="/api", tags=["Map Data"])
 
 # protected Routes
-# app.include_router(media.router, prefix="/media", tags=["Media Operations"])
 # app.include_router(stats.router, prefix="/stats", tags=["Statistics"])
 
 
