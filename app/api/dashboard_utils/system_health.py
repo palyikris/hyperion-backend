@@ -111,11 +111,29 @@ def get_container_cpu_percent():
     return 0.0
 
 
-def get_formatted_uptime():
-    """Calculates uptime as a percentage of a 24-hour window."""
+def get_uptime_sla_percent():
+    """Calculates uptime as a percentage of a 30-day rolling window (SLA-style)."""
     uptime_seconds = time.time() - START_TIME
-    uptime_percent = min(100.0, (uptime_seconds / 86400) * 100.0)
-    return round(uptime_percent, 1)
+    thirty_days_in_seconds = 30 * 24 * 60 * 60  # 2,592,000 seconds
+    uptime_percent = min(100.0, (uptime_seconds / thirty_days_in_seconds) * 100.0)
+    return round(uptime_percent, 2)
+
+
+def get_formatted_uptime():
+    """Returns human-readable uptime string (e.g., '3d 5h 22m')."""
+    uptime_seconds = int(time.time() - START_TIME)
+    days, remainder = divmod(uptime_seconds, 86400)
+    hours, remainder = divmod(remainder, 3600)
+    minutes, _ = divmod(remainder, 60)
+
+    parts = []
+    if days > 0:
+        parts.append(f"{days}d")
+    if hours > 0 or days > 0:
+        parts.append(f"{hours}h")
+    parts.append(f"{minutes}m")
+
+    return " ".join(parts)
 
 
 @router.get(
@@ -145,7 +163,8 @@ async def get_system_health(current_user=Depends(get_current_user)):
 
     return JSONResponse(
         content={
-            "uptime": get_formatted_uptime(),
+            "uptime": get_uptime_sla_percent(),
+            "uptime_formatted": get_formatted_uptime(),
             "server_load": list(load_history),
             "environment": "PROD",
             "status": system_status,

@@ -299,7 +299,11 @@ async def ai_worker_process(name: str):
                             Media.status != MediaStatus.FAILED,
                             Media.location.isnot(None),
                             Media.created_at >= forty_eight_hours_ago,
-                            func.ST_DWithin(Media.location, current_location, 0.0001),
+                            func.ST_DWithin(
+                                func.Geography(Media.location),
+                                func.Geography(current_location),
+                                10,  # 10 meters - using geography for accurate distance
+                            ),
                         )
                         .limit(1)
                     )
