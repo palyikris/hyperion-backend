@@ -277,14 +277,18 @@ async def ai_worker_process(name: str):
 
                     task_meta = task.technical_metadata or {}
                     max_confidence = max(d.confidence for d in fake_detections)
+                    task.has_trash = True
+                    task.confidence = round(max_confidence * 100, 2)
                     task_meta["has_trash"] = True
-                    task_meta["confidence"] = round(max_confidence * 100, 2)
+                    task_meta["confidence"] = task.confidence
                     task_meta["detections_count"] = len(fake_detections)
                     task.technical_metadata = task_meta
                 else:
                     task_meta = task.technical_metadata or {}
+                    task.has_trash = False
+                    task.confidence = 0.0
                     task_meta["has_trash"] = False
-                    task_meta["confidence"] = 0.0
+                    task_meta["confidence"] = task.confidence
                     task_meta["detections_count"] = 0
                     task.technical_metadata = task_meta
 

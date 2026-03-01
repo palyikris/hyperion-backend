@@ -1,4 +1,4 @@
-from sqlalchemy import String, ForeignKey, JSON, DateTime, Enum, Index
+from sqlalchemy import String, ForeignKey, JSON, DateTime, Enum, Index, Boolean, Float
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from datetime import datetime, timezone
 import uuid
@@ -46,6 +46,8 @@ class Media(Base):
     lng: Mapped[float | None] = mapped_column(nullable=True)
     altitude: Mapped[float | None] = mapped_column(nullable=True)
     address: Mapped[str | None] = mapped_column(String, nullable=True)
+    has_trash: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
 
     # Relationships
     uploader = relationship("User", backref="uploads")

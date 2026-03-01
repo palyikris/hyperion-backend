@@ -50,14 +50,10 @@ async def get_map_data(
         )
 
     if has_trash is not None:
-        query = query.where(
-            Media.technical_metadata["has_trash"].as_boolean() == has_trash
-        )
+        query = query.where(Media.has_trash == has_trash)
 
     if min_confidence is not None and min_confidence > 0:
-        query = query.where(
-            Media.technical_metadata["confidence"].as_float() >= min_confidence
-        )
+        query = query.where(Media.confidence >= min_confidence)
 
     result = await db.execute(query)
     records = result.scalars().all()
@@ -76,8 +72,8 @@ async def get_map_data(
                     "altitude": m.altitude,
                     "address": m.address,
                     "image_url": m.hf_path,
-                    "has_trash": (m.technical_metadata or {}).get("has_trash"),
-                    "confidence": (m.technical_metadata or {}).get("confidence"),
+                    "has_trash": m.has_trash,
+                    "confidence": m.confidence,
                     "detections": [
                         {
                             "label": d.label,
@@ -114,6 +110,8 @@ async def get_map_stats(
             detail="Invalid bounding box: min values must be <= max values.",
         )
 
+    # Cache key is scoped by user + normalized bbox/resolution, so repeated map views
+    # within a short interval can reuse the already computed cell stats.
     cache_key = (
         str(current_user.id),
         round(min_lat, 6),
@@ -128,11 +126,15 @@ async def get_map_stats(
     if cached and now - cached[0] <= STATS_CACHE_TTL_SECONDS:
         return cached[1]
 
+    # Bucket each media point into a grid cell by flooring lat/lng to the given
+    # resolution. Example: resolution 0.005 groups nearby points together.
     cell_lat_expr = (func.floor(Media.lat / resolution) * resolution).label("cell_lat")
     cell_lng_expr = (func.floor(Media.lng / resolution) * resolution).label("cell_lng")
-    has_trash_expr = Media.technical_metadata["has_trash"].as_boolean()
-    confidence_expr = Media.technical_metadata["confidence"].as_float()
+    has_trash_expr = Media.has_trash
+    confidence_expr = Media.confidence
 
+    # Base filters shared across all map stats queries so every metric uses the
+    # same uploader + bounded geographic window.
     media_filters = and_(
         Media.uploader_id == current_user.id,
         Media.lat.isnot(None),
@@ -141,6 +143,10 @@ async def get_map_stats(
         Media.lng.between(min_lng, max_lng),
     )
 
+    # Per-cell aggregate over Media:
+    # - total_reports: number of media points in the cell
+    # - trash_density: percent of points where media.has_trash is true
+    # - avg_confidence: mean confidence value (missing confidence treated as 0)
     media_agg_subq = (
         select(
             cell_lat_expr,
@@ -158,6 +164,8 @@ async def get_map_stats(
         .subquery()
     )
 
+    # Count detections by label for each cell. This is used to determine a single
+    # dominant label per cell.
     label_counts_subq = (
         select(
             cell_lat_expr,
@@ -172,6 +180,8 @@ async def get_map_stats(
         .subquery()
     )
 
+    # Rank labels per cell by descending count; tie-break alphabetically so the
+    # result is deterministic even when counts are equal.
     dominant_labels_ranked_subq = select(
         label_counts_subq.c.cell_lat,
         label_counts_subq.c.cell_lng,
@@ -190,6 +200,7 @@ async def get_map_stats(
         .label("rn"),
     ).subquery()
 
+    # Keep only the top-ranked (dominant) label for each cell.
     dominant_labels_subq = (
         select(
             dominant_labels_ranked_subq.c.cell_lat,
@@ -200,6 +211,8 @@ async def get_map_stats(
         .subquery()
     )
 
+    # Final result combines cell aggregates with the dominant label (if any).
+    # Outer join keeps cells that have media but no detections.
     stats_query = (
         select(
             media_agg_subq.c.cell_lat,
@@ -223,6 +236,7 @@ async def get_map_stats(
     result = await db.execute(stats_query)
     rows = result.all()
 
+    # Shape API payload and normalize numeric values for stable frontend rendering.
     response_payload = {
         "total": len(rows),
         "items": [
@@ -238,6 +252,7 @@ async def get_map_stats(
         ],
     }
 
+    # Store in short-lived in-memory cache to reduce repeated aggregate scans.
     _map_stats_cache[cache_key] = (now, response_payload)
     return response_payload
 
