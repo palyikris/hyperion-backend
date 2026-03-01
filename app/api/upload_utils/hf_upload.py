@@ -28,18 +28,36 @@ async def delete_from_hf(hf_path: str) -> bool:
     try:
         api = HfApi(token=HF_TOKEN)
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(
-            None,
-            lambda: api.delete_file(
-                path_in_repo=hf_path,
-                repo_id=HF_REPO_ID or "",
-                repo_type="dataset",
-                commit_message=f"Delete media file {hf_path}",
-            ),
-        )
+
+        base_name = hf_path.rsplit("/", 1)[-1]
+        if "_thumbnail_" in base_name:
+            paired_path = hf_path.replace("_thumbnail_", "_", 1)
+        else:
+            dir_part, name_part = hf_path.rsplit("/", 1)
+            paired_name = name_part.replace("_", "_thumbnail_", 1)
+            paired_path = f"{dir_part}/{paired_name}"
+
+        paths_to_delete = {hf_path, paired_path}
+
+        for path in paths_to_delete:
+            try:
+                await loop.run_in_executor(
+                    None,
+                    lambda p=path: api.delete_file(
+                        path_in_repo=p,
+                        repo_id=HF_REPO_ID or "",
+                        repo_type="dataset",
+                        commit_message=f"Delete media file {p}",
+                    ),
+                )
+            except Exception as delete_error:
+                if "404" in str(delete_error):
+                    continue
+                raise delete_error
+
         return True
     except Exception as e:
-        print(f"Error deleting file from HF: {str(e)}")
+        print(f"Error deleting file(s) from HF: {str(e)}")
         return False
 
 
@@ -53,14 +71,20 @@ async def process_hf_upload(files_data: list[tuple], user_id: str):
     operations = []
     media_ids = []
 
-    for m_id, filename, content in files_data:
-        hf_path = f"media/{user_id}/{date_str}/{m_id}_{filename}"
+    for m_id, filename, content, thumbnail_content in files_data:
+        full_path = f"media/{user_id}/{date_str}/{m_id}_{filename}"
+        thumb_path = f"media/{user_id}/{date_str}/{m_id}_thumbnail_{filename}"
 
         # registers file, but does not upload yet
         operations.append(
-            CommitOperationAdd(path_in_repo=hf_path, path_or_fileobj=content)
+            CommitOperationAdd(path_in_repo=full_path, path_or_fileobj=content)
         )
-        media_ids.append((m_id, hf_path))
+        operations.append(
+            CommitOperationAdd(
+                path_in_repo=thumb_path, path_or_fileobj=thumbnail_content
+            )
+        )
+        media_ids.append((m_id, thumb_path))
 
     try:
         loop = asyncio.get_event_loop()

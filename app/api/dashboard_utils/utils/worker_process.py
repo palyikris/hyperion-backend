@@ -122,10 +122,12 @@ async def ai_worker_process(name: str):
                 if not media_task or not media_task.hf_path:
                     raise ValueError(f"Media task {media_task_id} is missing hf_path")
 
+                original_path = media_task.hf_path.replace("_thumbnail_", "_")
+
                 local_file_path = await asyncio.to_thread(
                     hf_hub_download,
                     repo_id=hf_repo_id,
-                    filename=media_task.hf_path,
+                    filename=original_path,
                     repo_type="dataset",
                     token=hf_token,
                 )

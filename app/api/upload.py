@@ -48,6 +48,15 @@ async def batch_upload(
         img = Image.open(io.BytesIO(content))
         width, height = img.size
 
+        thumbnail_img = img.copy()
+        thumbnail_img.thumbnail((400, 400))
+        if thumbnail_img.mode != "RGB":
+            thumbnail_img = thumbnail_img.convert("RGB")
+
+        thumb_buffer = io.BytesIO()
+        thumbnail_img.save(thumb_buffer, format="JPEG", quality=85, optimize=True)
+        thumbnail_bytes = thumb_buffer.getvalue()
+
         media_id = uuid.uuid4()
         new_media = Media(
             id=media_id,
@@ -75,8 +84,7 @@ async def batch_upload(
         )
 
         media_records.append(new_media)
-        await file.seek(0)  # reset file pointer
-        files_to_process.append((media_id, file.filename, content))
+        files_to_process.append((media_id, file.filename, content, thumbnail_bytes))
 
     db.add_all(media_records)
     await db.commit()
