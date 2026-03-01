@@ -51,8 +51,10 @@ FastAPI backend for the Hyperion platform, providing user authentication, dashbo
 - **Worker Assignment Tracking**: View which AI worker is assigned to process each media item
 
 ### Map & Geospatial Analytics
+- **PostGIS Integration**: Spatial queries powered by PostGIS for efficient geospatial operations
 - **Map Data Feed**: Retrieve geotagged user media points with optional bounding-box and confidence filters
-- **Grid Stats API**: Get cell-based density, average confidence, and dominant detection label for map overlays
+- **Grid Stats API**: Get cell-based density, average confidence, and dominant detection label using ST_SnapToGrid
+- **Spatial Indexing**: GIST index on location column for optimized spatial queries using ST_Intersects
 - **Media Log Timeline**: Fetch per-media processing history for map-selected items
 - **Short-Lived Map Stats Cache**: 60-second in-memory cache for repeated stats queries
 
@@ -96,7 +98,8 @@ FastAPI backend for the Hyperion platform, providing user authentication, dashbo
 ## Tech Stack
 
 - **Framework**: FastAPI + Uvicorn (async Python web framework)
-- **Database**: SQLAlchemy (async ORM) + Alembic (schema migrations) + Postgres + asyncpg (async driver)
+- **Database**: SQLAlchemy (async ORM) + Alembic (schema migrations) + Postgres + PostGIS + asyncpg (async driver)
+- **Geospatial**: GeoAlchemy2 + PostGIS (spatial types, indexes, and functions)
 - **Authentication**: JWT (python-jose) + bcrypt (password hashing)
 - **Real-Time**: WebSocket support with connection manager for live status updates
 - **Media Storage**: HuggingFace Hub API integration for dataset uploads
@@ -107,7 +110,7 @@ FastAPI backend for the Hyperion platform, providing user authentication, dashbo
 ## Requirements
 
 - Python 3.10+
-- Postgres database
+- Postgres database with PostGIS extension (use `postgis/postgis:latest` Docker image)
 
 ## Environment Variables
 

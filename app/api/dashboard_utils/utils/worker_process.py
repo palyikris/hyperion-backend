@@ -1,6 +1,7 @@
 import asyncio
 from datetime import datetime, timezone, date
-from sqlalchemy import select, update, or_
+from sqlalchemy import select, update, or_, func
+from sqlalchemy.sql import text
 from app.database import AsyncSessionLocal
 from app.api.media_log_utils import create_status_change_log
 from app.models.db.Media import Media
@@ -195,10 +196,18 @@ async def ai_worker_process(name: str):
                     if "error" not in technical_meta and technical_meta.get("gps"):
                         gps_data = technical_meta["gps"]
                         if isinstance(gps_data, dict):
-                            update_values["lat"] = gps_data.get("lat")
-                            update_values["lng"] = gps_data.get("lng")
+                            lat = gps_data.get("lat")
+                            lng = gps_data.get("lng")
+                            update_values["lat"] = lat
+                            update_values["lng"] = lng
                             update_values["altitude"] = gps_data.get("altitude")
                             update_values["address"] = gps_data.get("address")
+
+                            # Update the PostGIS location column using ST_SetSRID(ST_MakePoint(...))
+                            if lat is not None and lng is not None:
+                                update_values["location"] = func.ST_SetSRID(
+                                    func.ST_MakePoint(lng, lat), 4326
+                                )
 
                     await session.execute(
                         update(Media)

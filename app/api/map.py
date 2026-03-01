@@ -3,6 +3,13 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, case, and_, desc
 from sqlalchemy.orm import selectinload
+from geoalchemy2.functions import (
+    ST_Intersects,
+    ST_MakeEnvelope,
+    ST_X,
+    ST_Y,
+    ST_SnapToGrid,
+)
 from typing import Optional
 from time import monotonic
 
@@ -39,15 +46,14 @@ async def get_map_data(
         .options(selectinload(Media.detections))
         .where(
             Media.uploader_id == current_user.id,
-            Media.lat.isnot(None),
-            Media.lng.isnot(None),
+            Media.location.isnot(None),
         )
     )
 
     if all(v is not None for v in [min_lat, max_lat, min_lng, max_lng]):
-        query = query.where(
-            Media.lat.between(min_lat, max_lat), Media.lng.between(min_lng, max_lng)
-        )
+        # Use ST_Intersects with ST_MakeEnvelope for spatial bounding box query
+        bbox = ST_MakeEnvelope(min_lng, min_lat, max_lng, max_lat, 4326)
+        query = query.where(ST_Intersects(Media.location, bbox))
 
     if has_trash is not None:
         query = query.where(Media.has_trash == has_trash)
@@ -58,6 +64,12 @@ async def get_map_data(
     result = await db.execute(query)
     records = result.scalars().all()
 
+    def extract_coords(media):
+        """Extract lat/lng from location geometry or fall back to legacy columns."""
+        if media.lat is not None and media.lng is not None:
+            return media.lat, media.lng
+        return None, None
+
     return JSONResponse(
         content={
             "total": len(records),
@@ -67,8 +79,8 @@ async def get_map_data(
                     "filename": m.initial_metadata.get("filename"),
                     "status": m.status.value,
                     "worker_name": m.assigned_worker,
-                    "lat": m.lat,
-                    "lng": m.lng,
+                    "lat": extract_coords(m)[0],
+                    "lng": extract_coords(m)[1],
                     "altitude": m.altitude,
                     "address": m.address,
                     "image_url": m.hf_path,
@@ -126,21 +138,23 @@ async def get_map_stats(
     if cached and now - cached[0] <= STATS_CACHE_TTL_SECONDS:
         return cached[1]
 
-    # Bucket each media point into a grid cell by flooring lat/lng to the given
-    # resolution. Example: resolution 0.005 groups nearby points together.
-    cell_lat_expr = (func.floor(Media.lat / resolution) * resolution).label("cell_lat")
-    cell_lng_expr = (func.floor(Media.lng / resolution) * resolution).label("cell_lng")
+    # Use ST_SnapToGrid for efficient grid cell bucketing with PostGIS
+    # This snaps each point to a grid and extracts the cell coordinates
+    snapped_point = ST_SnapToGrid(Media.location, resolution)
+    cell_lat_expr = ST_Y(snapped_point).label("cell_lat")
+    cell_lng_expr = ST_X(snapped_point).label("cell_lng")
     confidence_expr = Media.confidence
+
+    # Create bounding box for spatial filtering using ST_MakeEnvelope
+    bbox = ST_MakeEnvelope(min_lng, min_lat, max_lng, max_lat, 4326)
 
     # Base filters shared across all map stats queries so every metric uses the
     # same uploader + bounded geographic window.
     media_filters = and_(
         Media.uploader_id == current_user.id,
-        Media.lat.isnot(None),
-        Media.lng.isnot(None),
+        Media.location.isnot(None),
         Media.has_trash.is_(True),
-        Media.lat.between(min_lat, max_lat),
-        Media.lng.between(min_lng, max_lng),
+        ST_Intersects(Media.location, bbox),
     )
 
     # Per-cell aggregate over Media:
