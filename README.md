@@ -44,10 +44,17 @@ FastAPI backend for the Hyperion platform, providing user authentication, dashbo
   - Search by filename
   - Filter by media status
   - Sort by creation date, filename, or status
-  - Configurable pagination (limit/offset)
+  - Configurable pagination (page/page_size)
 - **Media Details**: Access comprehensive metadata including image URLs, technical metadata, and update timestamps
 - **Media Deletion**: Delete media items from personal vault with permission validation
+- **Bulk Cleanup**: Delete all vault media for the authenticated user in one request
 - **Worker Assignment Tracking**: View which AI worker is assigned to process each media item
+
+### Map & Geospatial Analytics
+- **Map Data Feed**: Retrieve geotagged user media points with optional bounding-box and confidence filters
+- **Grid Stats API**: Get cell-based density, average confidence, and dominant detection label for map overlays
+- **Media Log Timeline**: Fetch per-media processing history for map-selected items
+- **Short-Lived Map Stats Cache**: 60-second in-memory cache for repeated stats queries
 
 ### Media Upload
 - **Batch File Upload**: Upload multiple image files simultaneously with automatic image dimension extraction (width, height, size)
@@ -133,6 +140,7 @@ The API will be available at `http://127.0.0.1:8000` by default.
 py -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+alembic upgrade head
 uvicorn main:app --reload
 ```
 
@@ -180,19 +188,25 @@ docker run --rm -p 7860:7860 --env-file .env hyperion-backend
 - `GET /api/dashboard/user-experience` → Get engagement analytics (currently active users, active user trend history, average response time, 7-day daily activity trends, last update timestamp)
 
 #### Vault - Personal Media Library
-- `GET /api/vault` → Retrieve user's media library with search, filtering, sorting, and pagination (query params: search, status, order_by, direction, limit, offset)
+- `GET /api/vault` → Retrieve user's media library with search, filtering, sorting, and pagination (query params: search, status, order_by, direction, page, page_size)
+- `DELETE /api/vault/all` → Delete all media items owned by the authenticated user
 - `DELETE /api/vault/{id}` → Delete a media item from personal vault
 
 #### Upload - Media Management
-- `POST /api/files` → Batch upload multiple image files with automatic dimension extraction (creates PENDING media records, queues background HF upload)
-- `GET /api/recents` → Get 4 most recently uploaded media items with current status and metadata
-- `WebSocket /api/ws/updates` → Real-time WebSocket connection for upload and processing status updates (authentication via access_token cookie or query param; send_json includes media_id, status, worker, timestamp, img_url)
+- `POST /api/upload/files` → Batch upload multiple image files with automatic dimension extraction (creates PENDING media records, queues background HF upload)
+- `GET /api/upload/recents` → Get 4 most recently uploaded media items with current status and metadata
+- `WebSocket /api/upload/ws/updates` → Real-time status updates (auth via `access_token` cookie or `token` query param)
+
+#### Map - Geospatial Data
+- `GET /api/map` → Get user geotagged media points (query params: min_lat, max_lat, min_lng, max_lng, has_trash, min_confidence)
+- `GET /api/map/stats` → Get grid-aggregated map stats (required query params: min_lat, max_lat, min_lng, max_lng; optional: resolution)
+- `GET /api/map/{id}/logs` → Get processing/log history for one media item
 
 ## Notes
 
 - JWT access tokens expire in **30 minutes**; the login cookie is set for **60 minutes**
 - `SECRET_KEY` must be set for the app to start; used for JWT signing and token validation
-- The AI worker fleet consists of **10 persistent workers** that continuously monitor and process media from the queue (5-10 second extraction simulations, 20 second processing simulations)
+- The AI worker fleet consists of **10 persistent workers** started at app startup and continuously processes queued media
 - Media status pipeline: PENDING (initial upload) → UPLOADED (HF upload complete) → EXTRACTING (worker extraction phase) → PROCESSING (worker processing phase) → READY (complete) or FAILED (at any step)
 - **Reaper process**: Runs every 10 minutes to detect and recover stuck tasks (>15 min PENDING timeout, >10 min UPLOADED timeout) and reassign tasks from offline workers
 - **Worker health monitoring**: Workers marked offline if last_ping > 2 minutes; cluster status determined by active worker count (Optimal ≥3, Degraded <3, Stressed ≥8 working)
@@ -203,6 +217,7 @@ docker run --rm -p 7860:7860 --env-file .env hyperion-backend
 - Media files uploaded to HuggingFace Hub with structure: `media/{user_id}/{YYYY-MM-DD}/{media_id}_{filename}`
 - Database migrations use Alembic and must be run before first startup: `alembic upgrade head`
 - All timestamps use UTC timezone internally (timezone.utc)
+- Auth cookie is set with `HttpOnly`, `SameSite=None`, and `Secure=True`; browser-based local development may require HTTPS or token-query fallback for WebSocket auth
 
 ## License
 
