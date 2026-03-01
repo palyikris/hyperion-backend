@@ -62,6 +62,15 @@ async def delete_from_hf(hf_path: str) -> bool:
 
 
 async def process_hf_upload(files_data: list[tuple], user_id: str):
+    """
+    Process and upload files to Hugging Face.
+
+    Args:
+        files_data: List of tuples containing (media_id, filename, content_temp_path, thumbnail_temp_path)
+        user_id: The ID of the user uploading the files
+    """
+    import os
+
     api = HfApi(token=HF_TOKEN)
     date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
@@ -70,19 +79,21 @@ async def process_hf_upload(files_data: list[tuple], user_id: str):
 
     operations = []
     media_ids = []
+    temp_files_to_cleanup = []
 
-    for m_id, filename, content, thumbnail_content in files_data:
+    for m_id, filename, content_path, thumbnail_path in files_data:
         full_path = f"media/{user_id}/{date_str}/{m_id}_{filename}"
         thumb_path = f"media/{user_id}/{date_str}/{m_id}_thumbnail_{filename}"
 
-        # registers file, but does not upload yet
+        # Track temp files for cleanup
+        temp_files_to_cleanup.extend([content_path, thumbnail_path])
+
+        # CommitOperationAdd accepts file paths directly
         operations.append(
-            CommitOperationAdd(path_in_repo=full_path, path_or_fileobj=content)
+            CommitOperationAdd(path_in_repo=full_path, path_or_fileobj=content_path)
         )
         operations.append(
-            CommitOperationAdd(
-                path_in_repo=thumb_path, path_or_fileobj=thumbnail_content
-            )
+            CommitOperationAdd(path_in_repo=thumb_path, path_or_fileobj=thumbnail_path)
         )
         media_ids.append((m_id, thumb_path))
 
@@ -134,3 +145,12 @@ async def process_hf_upload(files_data: list[tuple], user_id: str):
                 )
             await session.commit()
         print(f"Batch upload failed: {e}")
+
+    finally:
+        # Clean up temp files regardless of success or failure
+        for temp_file in temp_files_to_cleanup:
+            try:
+                if os.path.exists(temp_file):
+                    os.remove(temp_file)
+            except Exception as cleanup_error:
+                print(f"Failed to cleanup temp file {temp_file}: {cleanup_error}")

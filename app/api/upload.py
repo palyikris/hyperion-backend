@@ -19,6 +19,9 @@ from app.api.upload_utils.conn_manager import worker_signal, manager
 from PIL import Image
 import io
 import uuid
+import asyncio
+import tempfile
+import os
 from fastapi.responses import JSONResponse
 from fastapi import HTTPException, status
 from app.models.upload.UploadResponse import UploadResponse, RecentsResponse
@@ -27,6 +30,34 @@ from sqlalchemy import select
 
 
 router = APIRouter()
+
+
+def _process_image_to_temp(
+    content: bytes, media_id: uuid.UUID
+) -> tuple[int, int, str, str]:
+    """
+    CPU-bound image processing: extract dimensions, create thumbnail, and save both to temp files.
+    This function runs in a thread pool to avoid blocking the event loop.
+    Returns: (width, height, content_temp_path, thumbnail_temp_path)
+    """
+    img = Image.open(io.BytesIO(content))
+    width, height = img.size
+
+    thumbnail_img = img.copy()
+    thumbnail_img.thumbnail((400, 400))
+    if thumbnail_img.mode != "RGB":
+        thumbnail_img = thumbnail_img.convert("RGB")
+
+    # Save original content to temp file
+    content_temp_path = os.path.join(tempfile.gettempdir(), f"{media_id}_content")
+    with open(content_temp_path, "wb") as f:
+        f.write(content)
+
+    # Save thumbnail to temp file
+    thumbnail_temp_path = os.path.join(tempfile.gettempdir(), f"{media_id}_thumbnail")
+    thumbnail_img.save(thumbnail_temp_path, format="JPEG", quality=85, optimize=True)
+
+    return width, height, content_temp_path, thumbnail_temp_path
 
 
 @router.post(
@@ -45,26 +76,23 @@ async def batch_upload(
 
     for file in files:
         content = await file.read()
-        img = Image.open(io.BytesIO(content))
-        width, height = img.size
-
-        thumbnail_img = img.copy()
-        thumbnail_img.thumbnail((400, 400))
-        if thumbnail_img.mode != "RGB":
-            thumbnail_img = thumbnail_img.convert("RGB")
-
-        thumb_buffer = io.BytesIO()
-        thumbnail_img.save(thumb_buffer, format="JPEG", quality=85, optimize=True)
-        thumbnail_bytes = thumb_buffer.getvalue()
-
         media_id = uuid.uuid4()
+
+        # Run CPU-bound image processing in a thread and save to temp files
+        # This frees RAM immediately after processing each file
+        width, height, content_path, thumbnail_path = await asyncio.to_thread(
+            _process_image_to_temp, content, media_id
+        )
+        # Release the in-memory content immediately
+        del content
+
         new_media = Media(
             id=media_id,
             uploader_id=current_user.id,
             status=MediaStatus.PENDING,
             initial_metadata={
                 "filename": file.filename,
-                "size": len(content),
+                "size": os.path.getsize(content_path),
                 "width": width,
                 "height": height,
             },
@@ -84,7 +112,8 @@ async def batch_upload(
         )
 
         media_records.append(new_media)
-        files_to_process.append((media_id, file.filename, content, thumbnail_bytes))
+        # Pass file paths instead of raw bytes
+        files_to_process.append((media_id, file.filename, content_path, thumbnail_path))
 
     db.add_all(media_records)
     await db.commit()

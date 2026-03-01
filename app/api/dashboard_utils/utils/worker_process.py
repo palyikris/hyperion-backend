@@ -296,7 +296,7 @@ async def ai_worker_process(name: str):
                         select(Media)
                         .where(
                             Media.id != media_task_id,
-                            Media.status == MediaStatus.READY,
+                            Media.status != MediaStatus.FAILED,
                             Media.location.isnot(None),
                             Media.created_at >= forty_eight_hours_ago,
                             func.ST_DWithin(Media.location, current_location, 0.0001),
