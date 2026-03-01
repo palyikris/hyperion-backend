@@ -9,12 +9,11 @@ from app.api import dashboard
 from app.api import upload
 from app.api import vault
 from app.api import map
+from app.api import stats
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.dashboard_utils.ux import track_ux_metrics
 from app.api.dashboard_utils.utils.init_workers import initialize_worker_fleet
 import os
-
-# media, stats
 
 
 app = FastAPI(
@@ -60,9 +59,7 @@ app.include_router(dashboard.router, prefix="/api/dashboard", tags=["Dashboard"]
 app.include_router(upload.router, prefix="/api/upload", tags=["Media Upload"])
 app.include_router(vault.router, prefix="/api", tags=["Media Vault"])
 app.include_router(map.router, prefix="/api", tags=["Map Data"])
-
-# protected Routes
-# app.include_router(stats.router, prefix="/stats", tags=["Statistics"])
+app.include_router(stats.router, prefix="/api", tags=["Statistics"])
 
 
 @app.get("/")
