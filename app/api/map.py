@@ -1,14 +1,14 @@
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from sqlalchemy.orm import selectinload
-from typing import Optional, List
+from typing import Optional
 
 from app.database import get_db
 from app.api.deps import get_current_user
 from app.models.db.Media import Media
-from app.models.map.MapResponse import MapResponse
+from app.models.db.MediaLog import MediaLog
+from app.models.map.MapResponse import MapLogsResponse, MapResponse
 
 router = APIRouter()
 
@@ -28,14 +28,10 @@ async def get_map_data(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    query = (
-        select(Media)
-        .where(
-            Media.uploader_id == current_user.id,
-            Media.lat.isnot(None),
-            Media.lng.isnot(None),
-        )
-        .options(selectinload(Media.logs))
+    query = select(Media).where(
+        Media.uploader_id == current_user.id,
+        Media.lat.isnot(None),
+        Media.lng.isnot(None),
     )
 
     if all(v is not None for v in [min_lat, max_lat, min_lng, max_lng]):
@@ -70,17 +66,56 @@ async def get_map_data(
                     "altitude": m.altitude,
                     "address": m.address,
                     "image_url": m.hf_path,
-                    "history": [
-                        {
-                            "action": log.action,
-                            "message": log.message,
-                            "worker_name": log.worker_name,
-                            "timestamp": log.timestamp.isoformat(),
-                        }
-                        for log in sorted(m.logs, key=lambda x: x.timestamp)
-                    ],
                 }
                 for m in records
+            ],
+        }
+    )
+
+
+@router.get(
+    "/map/{id}/logs",
+    status_code=status.HTTP_200_OK,
+    response_model=MapLogsResponse,
+)
+async def get_map_item_logs(
+    id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    media_query = select(Media.id).where(
+        Media.id == id,
+        Media.uploader_id == current_user.id,
+    )
+    media_result = await db.execute(media_query)
+    media_id = media_result.scalar_one_or_none()
+
+    if not media_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Media not found",
+        )
+
+    logs_query = (
+        select(MediaLog)
+        .where(MediaLog.media_id == media_id)
+        .order_by(MediaLog.timestamp)
+    )
+    logs_result = await db.execute(logs_query)
+    logs = logs_result.scalars().all()
+
+    return JSONResponse(
+        content={
+            "media_id": str(media_id),
+            "total": len(logs),
+            "history": [
+                {
+                    "action": log.action,
+                    "message": log.message,
+                    "worker_name": log.worker_name,
+                    "timestamp": log.timestamp.isoformat(),
+                }
+                for log in logs
             ],
         }
     )

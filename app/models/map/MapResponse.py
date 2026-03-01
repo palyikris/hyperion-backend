@@ -20,9 +20,14 @@ class MapItem(BaseModel):
     altitude: Optional[float] = None
     address: Optional[str] = None
     image_url: Optional[str] = None
-    history: List[MapMediaLog]
 
 
 class MapResponse(BaseModel):
     items: List[MapItem]
+    total: int
+
+
+class MapLogsResponse(BaseModel):
+    media_id: str
+    history: List[MapMediaLog]
     total: int
