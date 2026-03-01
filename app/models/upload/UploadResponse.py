@@ -13,6 +13,7 @@ class RecentMediaItem(BaseModel):
     timestamp: str
     image_url: Optional[str] = None
     metadata: Optional[dict] = None
+    failed_reason: Optional[str] = None
 
 
 class RecentsResponse(BaseModel):

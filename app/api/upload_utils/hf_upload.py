@@ -121,8 +121,16 @@ async def process_hf_upload(files_data: list[tuple], user_id: str):
                 await session.execute(
                     update(Media)
                     .where(Media.id == m_id)
-                    .values(status=MediaStatus.FAILED)
+                    .values(
+                        status=MediaStatus.FAILED,
+                        failed_reason="Server encountered an issue while saving your files to secure storage.",
+                    )
                 )
-                await manager.send_status(user_id, str(m_id), "FAILED")
+                await manager.send_status(
+                    user_id,
+                    str(m_id),
+                    "FAILED",
+                    failed_reason="Server encountered an issue while saving your files to secure storage.",
+                )
             await session.commit()
         print(f"Batch upload failed: {e}")

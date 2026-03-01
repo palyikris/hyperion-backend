@@ -52,6 +52,7 @@ class Media(Base):
     address: Mapped[str | None] = mapped_column(String, nullable=True)
     has_trash: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    failed_reason: Mapped[str | None] = mapped_column(String, nullable=True)
 
     # Relationships
     uploader = relationship("User", backref="uploads")

@@ -95,6 +95,7 @@ async def get_map_data(
                         }
                         for d in m.detections
                     ],
+                    "failed_reason": m.failed_reason,
                 }
                 for m in records
             ],

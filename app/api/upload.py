@@ -132,6 +132,7 @@ async def get_recents(
                     "image_url": media.hf_path,
                     "metadata": media.initial_metadata,
                     "address": media.address,
+                    "failed_reason": media.failed_reason,
                 }
                 for media in recent_media
             ],

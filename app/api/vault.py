@@ -96,6 +96,7 @@ async def get_media_vault(
                     "lng": media.lng,
                     "altitude": media.altitude,
                     "address": media.address,
+                    "failed_reason": media.failed_reason,
                 }
                 for media in records
             ],

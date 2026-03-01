@@ -30,6 +30,7 @@ class MapItem(BaseModel):
     has_trash: Optional[bool] = None
     confidence: Optional[float] = None
     detections: List[MapDetection] = Field(default_factory=list)
+    failed_reason: Optional[str] = None
 
 
 class MapResponse(BaseModel):

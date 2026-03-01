@@ -11,6 +11,7 @@ from app.api.upload_utils.conn_manager import worker_signal, manager
 
 
 async def _build_pending_timeout_detail(session, media_id):
+    """Returns a tuple of (log_detail, user_friendly_reason) for pending timeouts."""
     latest_log_result = await session.execute(
         select(MediaLog.message)
         .where(MediaLog.media_id == media_id)
@@ -32,10 +33,14 @@ async def _build_pending_timeout_detail(session, media_id):
             inferred_step = "at unknown pipeline step"
 
     if latest_log:
-        return (
+        log_detail = (
             f"reaper pending timeout: failed {inferred_step} (last log: {latest_log})"
         )
-    return f"reaper pending timeout: failed {inferred_step}"
+    else:
+        log_detail = f"reaper pending timeout: failed {inferred_step}"
+
+    user_friendly_reason = "Upload took too long to complete. Please try again."
+    return log_detail, user_friendly_reason
 
 
 async def ai_reaper_process():
@@ -78,8 +83,8 @@ async def ai_reaper_process():
                 stale_pending_tasks = stale_pending_query.scalars().all()
 
                 for task in stale_pending_tasks:
-                    failure_detail = await _build_pending_timeout_detail(
-                        session, task.id
+                    failure_detail, user_friendly_reason = (
+                        await _build_pending_timeout_detail(session, task.id)
                     )
                     failure_log = create_status_change_log(
                         media_id=task.id,
@@ -93,9 +98,11 @@ async def ai_reaper_process():
                         media_id=str(task.id),
                         status=MediaStatus.FAILED.value,
                         worker=None,
+                        failed_reason=user_friendly_reason,
                     )
 
                     task.status = MediaStatus.FAILED
+                    task.failed_reason = user_friendly_reason
                     task.assigned_worker = None
                     changes_made = True
 
