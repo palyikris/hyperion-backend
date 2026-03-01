@@ -29,10 +29,11 @@ def _is_image_media(media: Media) -> bool:
 
 
 def _generate_fake_detections(media_id):
-    if random.random() > 0.65:
+    has_trash = random.random() < 0.70
+    if not has_trash:
         return []
 
-    detection_count = random.randint(1, 6)
+    detection_count = random.randint(1, 5)
     detections: list[Detection] = []
 
     for _ in range(detection_count):
@@ -53,6 +54,10 @@ def _generate_fake_detections(media_id):
         )
 
     return detections
+
+
+def _simulation_processing_delay_seconds() -> float:
+    return round(random.uniform(1.5, 5.0), 2)
 
 
 async def ai_worker_process(name: str):
@@ -255,7 +260,7 @@ async def ai_worker_process(name: str):
                 worker=name,
             )
 
-            await asyncio.sleep(20)
+            await asyncio.sleep(_simulation_processing_delay_seconds())
 
             async with AsyncSessionLocal() as session:
                 res = await session.execute(

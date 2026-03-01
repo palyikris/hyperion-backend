@@ -1,4 +1,4 @@
-from sqlalchemy import String, ForeignKey, JSON, DateTime, Enum
+from sqlalchemy import String, ForeignKey, JSON, DateTime, Enum, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from datetime import datetime, timezone
 import uuid
@@ -7,6 +7,11 @@ from app.models.upload.MediaStatus import MediaStatus
 
 class Media(Base):
     __tablename__ = "media"
+    __table_args__ = (
+        Index("ix_media_lat", "lat"),
+        Index("ix_media_lng", "lng"),
+        Index("ix_media_lat_lng", "lat", "lng"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     uploader_id: Mapped[str] = mapped_column(
@@ -47,5 +52,5 @@ class Media(Base):
     worker = relationship("AIWorkerState", backref="current_tasks")
     logs = relationship("MediaLog", backref="media", cascade="all, delete-orphan")
     detections = relationship(
-        "Detection", backref="media", cascade="all, delete-orphan"
+        "Detection", backref="media", cascade="all, delete-orphan", lazy="selectin"
     )
