@@ -46,3 +46,6 @@ class Media(Base):
     uploader = relationship("User", backref="uploads")
     worker = relationship("AIWorkerState", backref="current_tasks")
     logs = relationship("MediaLog", backref="media", cascade="all, delete-orphan")
+    detections = relationship(
+        "Detection", backref="media", cascade="all, delete-orphan"
+    )

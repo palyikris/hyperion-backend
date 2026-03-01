@@ -10,6 +10,50 @@ from app.api.upload_utils.conn_manager import worker_signal, manager
 from huggingface_hub import hf_hub_download
 import os
 from app.api.upload_utils.metadata_extractor import extract_media_metadata
+import random
+from app.models.db.Detection import Detection
+
+
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff", ".heic"}
+FAKE_DETECTION_LABELS = ["plastic", "metal", "glass", "paper", "trash"]
+
+
+def _is_image_media(media: Media) -> bool:
+    metadata = media.initial_metadata or {}
+    mimetype = str(metadata.get("mime_type") or metadata.get("mimetype") or "").lower()
+    if mimetype.startswith("image/"):
+        return True
+
+    hf_path = (media.hf_path or "").lower()
+    return any(hf_path.endswith(ext) for ext in IMAGE_EXTENSIONS)
+
+
+def _generate_fake_detections(media_id):
+    if random.random() > 0.65:
+        return []
+
+    detection_count = random.randint(1, 6)
+    detections: list[Detection] = []
+
+    for _ in range(detection_count):
+        x = round(random.uniform(0.0, 0.75), 4)
+        y = round(random.uniform(0.0, 0.75), 4)
+        w = round(random.uniform(0.1, 0.35), 4)
+        h = round(random.uniform(0.1, 0.35), 4)
+
+        detections.append(
+            Detection(
+                media_id=media_id,
+                label=random.choice(FAKE_DETECTION_LABELS),
+                confidence=round(random.uniform(0.55, 0.99), 4),
+                bbox={"x": x, "y": y, "w": w, "h": h},
+                is_manual=False,
+                area_sqm=round(random.uniform(0.1, 4.0), 3),
+            )
+        )
+
+    return detections
+
 
 async def ai_worker_process(name: str):
     """
@@ -218,6 +262,27 @@ async def ai_worker_process(name: str):
                     select(Media).where(Media.id == media_task_id)
                 )
                 task = res.scalar_one()
+
+                fake_detections = []
+                if _is_image_media(task):
+                    fake_detections = _generate_fake_detections(task.id)
+
+                if fake_detections:
+                    session.add_all(fake_detections)
+
+                    task_meta = task.technical_metadata or {}
+                    max_confidence = max(d.confidence for d in fake_detections)
+                    task_meta["has_trash"] = True
+                    task_meta["confidence"] = round(max_confidence * 100, 2)
+                    task_meta["detections_count"] = len(fake_detections)
+                    task.technical_metadata = task_meta
+                else:
+                    task_meta = task.technical_metadata or {}
+                    task_meta["has_trash"] = False
+                    task_meta["confidence"] = 0.0
+                    task_meta["detections_count"] = 0
+                    task.technical_metadata = task_meta
+
                 task.status = MediaStatus.READY
 
                 await session.execute(
