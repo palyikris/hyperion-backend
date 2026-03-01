@@ -281,34 +281,36 @@ async def get_temporal_trends(
     """
     # Calculate the cutoff date (start of our time window)
     cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
-    
+
+    day_bucket = func.date_trunc("day", Media.created_at)
+
     query = (
         select(
             # Truncate timestamp to day precision for daily bucketing
-            func.date_trunc('day', Media.created_at).label("day"),
-            func.count(Media.id).label("count")
+            day_bucket.label("day"),
+            func.count(Media.id).label("count"),
         )
         .where(
             Media.uploader_id == user_id,
             Media.has_trash == True,  # Only count media containing detected trash
-            Media.created_at >= cutoff_date
+            Media.created_at >= cutoff_date,
         )
-        .group_by(func.date_trunc('day', Media.created_at))
-        .order_by(func.date_trunc('day', Media.created_at))
+        .group_by(day_bucket)
+        .order_by(day_bucket)
     )
-    
+
     result = await db.execute(query)
     rows = result.all()
-    
+
     # Create a lookup dict: date -> count for O(1) access
     data_by_date = {row[0].date(): int(row[1]) for row in rows}
-    
+
     # Fill in zero-days for continuous chart rendering
     # Start from (days-1) ago to include 'days' total days ending today
     trends = []
     current_date = (datetime.now(timezone.utc) - timedelta(days=days - 1)).date()
     end_date = datetime.now(timezone.utc).date()
-    
+
     while current_date <= end_date:
         count_val = data_by_date.get(current_date, 0)  # Default to 0 if no data
         trends.append(TemporalTrend(
@@ -316,7 +318,7 @@ async def get_temporal_trends(
             count=int(count_val)
         ))
         current_date += timedelta(days=1)
-    
+
     return trends
 
 
