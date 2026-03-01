@@ -1,7 +1,9 @@
 import asyncio
 from datetime import datetime, timezone, date
-from sqlalchemy import select, update, or_, func
+from sqlalchemy import select, update, or_, func, and_
 from sqlalchemy.sql import text
+from geoalchemy2.functions import ST_DWithin, ST_SetSRID, ST_MakePoint
+from datetime import timedelta
 from app.database import AsyncSessionLocal
 from app.api.media_log_utils import create_status_change_log
 from app.models.db.Media import Media
@@ -267,6 +269,79 @@ async def ai_worker_process(name: str):
 
             if not extraction_ok:
                 await asyncio.sleep(5)
+                continue
+
+            # Duplicate detection: Check for nearby items within ~10 meters (0.0001 degrees)
+            # uploaded in the last 48 hours with READY status
+            duplicate_found = False
+            async with AsyncSessionLocal() as session:
+                res = await session.execute(
+                    select(Media).where(Media.id == media_task_id)
+                )
+                current_task = res.scalar_one_or_none()
+
+                if (
+                    current_task
+                    and current_task.lat is not None
+                    and current_task.lng is not None
+                ):
+                    forty_eight_hours_ago = datetime.now(timezone.utc) - timedelta(
+                        hours=48
+                    )
+                    current_location = func.ST_SetSRID(
+                        func.ST_MakePoint(current_task.lng, current_task.lat), 4326
+                    )
+
+                    duplicate_query = (
+                        select(Media)
+                        .where(
+                            Media.id != media_task_id,
+                            Media.status == MediaStatus.READY,
+                            Media.location.isnot(None),
+                            Media.created_at >= forty_eight_hours_ago,
+                            func.ST_DWithin(Media.location, current_location, 0.0001),
+                        )
+                        .limit(1)
+                    )
+                    dup_result = await session.execute(duplicate_query)
+                    duplicate = dup_result.scalar_one_or_none()
+
+                    if duplicate:
+                        duplicate_found = True
+                        original_name = (duplicate.initial_metadata or {}).get(
+                            "filename", "Unknown"
+                        )
+                        original_date = duplicate.created_at.strftime("%Y-%m-%d %H:%M")
+                        duplicate_reason = f"Image is a duplicate of image {original_name} uploaded at {original_date}"
+
+                        current_task.status = MediaStatus.FAILED
+                        current_task.failed_reason = duplicate_reason
+                        current_task.original_media_id = duplicate.id
+
+                        session.add(
+                            create_status_change_log(
+                                media_id=media_task_id,
+                                status=MediaStatus.FAILED,
+                                worker_name=name,
+                                detail="Duplicate detected",
+                            )
+                        )
+                        await session.execute(
+                            update(AIWorkerState)
+                            .where(AIWorkerState.name == name)
+                            .values(status="Active")
+                        )
+                        await session.commit()
+
+                        await manager.send_status(
+                            user_id=str(uploader_id),
+                            media_id=str(media_task_id),
+                            status=MediaStatus.FAILED.value,
+                            worker=name,
+                            failed_reason=duplicate_reason,
+                        )
+
+            if duplicate_found:
                 continue
 
             await manager.send_status(

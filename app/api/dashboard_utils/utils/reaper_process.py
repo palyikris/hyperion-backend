@@ -127,22 +127,25 @@ async def ai_reaper_process():
                     )
                     zombie_tasks = zombie_tasks_query.scalars().all()
 
+                    zombie_failed_reason = "Processing was interrupted. The task has been canceled to prevent data errors."
                     for task in zombie_tasks:
                         recovery_log = create_status_change_log(
                             media_id=task.id,
-                            status=MediaStatus.UPLOADED,
-                            detail="reaper recovery",
+                            status=MediaStatus.FAILED,
+                            detail="reaper zombie recovery",
                         )
                         session.add(recovery_log)
 
                         await manager.send_status(
                             user_id=str(task.uploader_id),
                             media_id=str(task.id),
-                            status=MediaStatus.UPLOADED.value,
+                            status=MediaStatus.FAILED.value,
                             worker=None,
+                            failed_reason=zombie_failed_reason,
                         )
 
-                        task.status = MediaStatus.UPLOADED
+                        task.status = MediaStatus.FAILED
+                        task.failed_reason = zombie_failed_reason
                         task.assigned_worker = None
                         changes_made = True
 
