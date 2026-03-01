@@ -130,7 +130,6 @@ async def get_map_stats(
     # resolution. Example: resolution 0.005 groups nearby points together.
     cell_lat_expr = (func.floor(Media.lat / resolution) * resolution).label("cell_lat")
     cell_lng_expr = (func.floor(Media.lng / resolution) * resolution).label("cell_lng")
-    has_trash_expr = Media.has_trash
     confidence_expr = Media.confidence
 
     # Base filters shared across all map stats queries so every metric uses the
@@ -139,24 +138,19 @@ async def get_map_stats(
         Media.uploader_id == current_user.id,
         Media.lat.isnot(None),
         Media.lng.isnot(None),
+        Media.has_trash.is_(True),
         Media.lat.between(min_lat, max_lat),
         Media.lng.between(min_lng, max_lng),
     )
 
     # Per-cell aggregate over Media:
     # - total_reports: number of media points in the cell
-    # - trash_density: percent of points where media.has_trash is true
     # - avg_confidence: mean confidence value (missing confidence treated as 0)
     media_agg_subq = (
         select(
             cell_lat_expr,
             cell_lng_expr,
             func.count(Media.id).label("total_reports"),
-            (
-                func.sum(case((has_trash_expr.is_(True), 1), else_=0))
-                * 100.0
-                / func.nullif(func.count(Media.id), 0)
-            ).label("trash_density"),
             func.avg(func.coalesce(confidence_expr, 0.0)).label("avg_confidence"),
         )
         .where(media_filters)
@@ -218,7 +212,6 @@ async def get_map_stats(
             media_agg_subq.c.cell_lat,
             media_agg_subq.c.cell_lng,
             media_agg_subq.c.total_reports,
-            media_agg_subq.c.trash_density,
             media_agg_subq.c.avg_confidence,
             dominant_labels_subq.c.label,
         )
@@ -237,13 +230,17 @@ async def get_map_stats(
     rows = result.all()
 
     # Shape API payload and normalize numeric values for stable frontend rendering.
+    # density is report concentration per square-degree cell area:
+    # count / (resolution^2). This remains meaningful after excluding non-trash media.
     response_payload = {
         "total": len(rows),
         "items": [
             {
                 "lat": float(row.cell_lat),
                 "lng": float(row.cell_lng),
-                "density": round(float(row.trash_density or 0.0), 2),
+                "density": round(
+                    float((row.total_reports or 0) / (resolution * resolution)), 2
+                ),
                 "count": int(row.total_reports or 0),
                 "confidence": round(float(row.avg_confidence or 0.0), 2),
                 "label": row.label,
