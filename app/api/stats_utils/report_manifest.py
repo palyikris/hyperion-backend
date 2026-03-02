@@ -404,9 +404,8 @@ def create_excel_file(data: list[dict]) -> BytesIO:
         worksheet.auto_filter.ref = worksheet.dimensions
         worksheet.freeze_panes = "A2"
 
-        # Enable sheet protection with password (optional: user can specify)
+        # Enable sheet protection (without password)
         worksheet.protection.sheet = True
-        worksheet.protection.password = None  # Remove or set a password
         worksheet.protection.enable()
 
     buffer.seek(0)
