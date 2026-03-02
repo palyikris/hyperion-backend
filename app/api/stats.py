@@ -373,6 +373,11 @@ async def get_cleanup_manifest_report(
         le=365,
         description="Time window in days for the report (1-365)",
     ),
+    language: str = Query(
+        default="en",
+        regex="^(en|hu)$",
+        description="Language for the report: 'en' (English) or 'hu' (Hungarian)",
+    ),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -394,6 +399,7 @@ async def get_cleanup_manifest_report(
 
     Query Parameters:
         - days (int, default=30): Number of days to look back from now (1-365)
+        - language (str, default="en"): Report language ("en" for English, "hu" for Hungarian)
 
     Security:
         - All data is strictly filtered by uploader_id (current user)
@@ -419,14 +425,20 @@ async def get_cleanup_manifest_report(
     # Generate flattened data (one row per detection)
     manifest_data = await generate_manifest_data(db, current_user.id, days)
 
-    # Convert to Excel file in memory
-    excel_buffer = create_excel_file(manifest_data)
+    # Convert to Excel file in memory with specified language
+    excel_buffer = create_excel_file(manifest_data, language=language)
+
+    # Generate timestamped and localized filename
+    from datetime import datetime
+    from app.api.stats_utils.report_manifest import _get_translation
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    manifest_label = _get_translation(language, "Cleanup Manifest").replace(" ", "_")
+    filename = f"Hyperion_{manifest_label}_{timestamp}.xlsx"
 
     # Return as downloadable Excel file
     return Response(
         content=excel_buffer.getvalue(),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={
-            "Content-Disposition": "attachment; filename=Hyperion_Cleanup_Manifest.xlsx"
-        },
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
     )

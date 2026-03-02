@@ -164,16 +164,85 @@ from openpyxl.utils import get_column_letter
 from openpyxl.formatting.rule import ColorScaleRule
 
 
-def create_excel_file(data: list[dict]) -> BytesIO:
+# Language translations for Excel labels
+TRANSLATIONS = {
+    "en": {
+        "Media ID": "Media ID",
+        "Detection ID": "Detection ID",
+        "Filename": "Filename",
+        "Navigation": "Navigation",
+        "Latitude": "Latitude",
+        "Longitude": "Longitude",
+        "Drone Altitude (m)": "Drone Altitude (m)",
+        "Address": "Address",
+        "Object Label": "Object Label",
+        "Confidence (%)": "Confidence (%)",
+        "Area (sqm)": "Area (sqm)",
+        "Camera Make": "Camera Make",
+        "Camera Model": "Camera Model",
+        "Date Taken": "Date Taken",
+        "Assigned Titan": "Assigned Titan",
+        "Image URL": "Image URL",
+        "Upload Date": "Upload Date",
+        "Field Notes": "Field Notes",
+        "Cleanup Status": "Cleanup Status",
+        "Open Maps": "Open Maps",
+        "Cleanup Manifest": "Cleanup Manifest",
+        "N/A": "N/A",
+        "Pending": "Pending",
+    },
+    "hu": {
+        "Media ID": "Média azonosító",
+        "Detection ID": "Detektálás azonosító",
+        "Filename": "Fájlnév",
+        "Navigation": "Navigáció",
+        "Latitude": "Szélesség",
+        "Longitude": "Hosszúság",
+        "Drone Altitude (m)": "Drón magassága (m)",
+        "Address": "Cím",
+        "Object Label": "Objektum típusa",
+        "Confidence (%)": "Megbízhatóság (%)",
+        "Area (sqm)": "Terület (m²)",
+        "Camera Make": "Kamera gyártó",
+        "Camera Model": "Kamera modell",
+        "Date Taken": "Felvétel dátuma",
+        "Assigned Titan": "Hozzárendelt Titan",
+        "Image URL": "Kép URL",
+        "Upload Date": "Feltöltés dátuma",
+        "Field Notes": "Megjegyzések",
+        "Cleanup Status": "Tisztítási státusz",
+        "Open Maps": "Térkép megnyitása",
+        "Cleanup Manifest": "Tisztítási Manifeszt",
+        "N/A": "N/A",
+        "Pending": "Függőben",
+    },
+}
+
+
+def _get_translation(language: str, key: str) -> str:
     """
-    Advanced Excel generator with Hyperion branding, dashboard, filters, and cell protection.
+    Get translated string for the given key.
+    Falls back to English if language or key not found.
+    """
+    lang = language if language in TRANSLATIONS else "en"
+    return TRANSLATIONS[lang].get(key, TRANSLATIONS["en"].get(key, key))
+
+
+def create_excel_file(data: list[dict], language: str = "en") -> BytesIO:
+    """
+    Advanced Excel generator with Hyperion branding, filters, and cell protection.
+
+    Supports English and Hungarian output (fallback: English).
 
     Features:
-    - Dashboard worksheet with summary statistics and worker stats
     - Manifest worksheet with Hyperion Indigo styling
     - Google Maps navigation hyperlinks
     - 3-color scale conditional formatting on Confidence column
     - Sheet protection (Field Notes and Cleanup Status unlocked)
+
+    Args:
+        data: List of detection dictionaries
+        language: Language code ("hu" for Hungarian, "en" for English, default: "en")
     """
     df = pd.DataFrame(data)
     buffer = BytesIO()
@@ -183,113 +252,41 @@ def create_excel_file(data: list[dict]) -> BytesIO:
     HYPERION_WHITE = "F8F9F4"
     BORDER_COLOR = "4B5563"
 
-    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-        # ==================== WORKSHEET 1: DASHBOARD ====================
-        # Create summary statistics
-        total_detections = len(df)
-        unique_media = df["Media ID"].nunique()
-        avg_confidence = df["Confidence (%)"].mean()
-        unique_labels = df["Object Label"].nunique()
-        worker_counts = df["Assigned Titan"].value_counts().to_dict()
-
-        dashboard_data = {
-            "Metric": [
-                "Total Detections",
-                "Unique Media Files",
-                "Average Detection Confidence",
-                "Unique Object Labels",
-                "",
-                "Worker Assignment Summary",
-            ],
-            "Value": [
-                total_detections,
-                unique_media,
-                f"{avg_confidence:.2f}%",
-                unique_labels,
-                "",
-                "",
-            ],
+    # Translate default values in the dataframe
+    df = df.replace(
+        {
+            "N/A": _get_translation(language, "N/A"),
+            "Pending": _get_translation(language, "Pending"),
         }
+    )
 
-        # Add worker stats
-        for idx, (worker, count) in enumerate(worker_counts.items()):
-            dashboard_data["Metric"].append(f"  {worker or 'Unassigned'}")
-            dashboard_data["Metric"].append("")  # Placeholder
-            dashboard_data["Value"].insert(
-                len(dashboard_data["Value"]), count
-            )  # Insert count value
-
-        dashboard_df = pd.DataFrame(
-            {
-                "Metric": [
-                    "Total Detections",
-                    "Unique Media Files",
-                    "Average Detection Confidence",
-                    "Unique Object Labels",
-                    "",
-                    "Worker Assignment Summary",
-                ]
-                + [f"  {w or 'Unassigned'}" for w in worker_counts.keys()]
-            }
-        )
-
-        dashboard_df.to_excel(writer, index=False, sheet_name="Dashboard")
-        dashboard_sheet = writer.sheets["Dashboard"]
-
-        # Style the Dashboard
-        dashboard_header_fill = PatternFill(
-            start_color=HYPERION_BRAND, end_color=HYPERION_BRAND, fill_type="solid"
-        )
-        dashboard_header_font = Font(color=HYPERION_WHITE, bold=True, size=12)
-        dashboard_header_alignment = Alignment(horizontal="left", vertical="center")
-
-        thin_border = Side(border_style="thin", color=BORDER_COLOR)
-        header_border = Border(
-            bottom=thin_border, top=thin_border, left=thin_border, right=thin_border
-        )
-
-        # Style header row
-        for col in range(1, 3):
-            cell = dashboard_sheet.cell(row=1, column=col)
-            cell.fill = dashboard_header_fill
-            cell.font = dashboard_header_font
-            cell.alignment = dashboard_header_alignment
-            cell.border = header_border
-
-        # Add metric values
-        if total_detections > 0:
-            dashboard_sheet["B2"] = total_detections
-            dashboard_sheet["B3"] = unique_media
-            dashboard_sheet["B4"] = f"{avg_confidence:.2f}%"
-            dashboard_sheet["B5"] = unique_labels
-
-        row_idx = 7
-        for worker, count in worker_counts.items():
-            dashboard_sheet[f"B{row_idx}"] = count
-            row_idx += 1
-
-        # Format dashboard columns
-        dashboard_sheet.column_dimensions["A"].width = 35
-        dashboard_sheet.column_dimensions["B"].width = 20
-
-        # ==================== WORKSHEET 2: MANIFEST ====================
-        # Insert Navigation column (Google Maps links)
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        # ==================== WORKSHEET: MANIFEST ====================
+        # Insert Navigation column (Google Maps links) - before translating column names
         df_with_nav = df.copy()
         df_with_nav.insert(
             3,
             "Navigation",
             df_with_nav.apply(
                 lambda row: (
-                    f"=HYPERLINK(\"https://maps.google.com/maps?q={row['Latitude']},{row['Longitude']}\",\"Open Maps\")"
-                    if row["Latitude"] != "N/A" and row["Longitude"] != "N/A"
-                    else "N/A"
+                    f"=HYPERLINK(\"https://maps.google.com/maps?q={row['Latitude']},{row['Longitude']}\",\"{_get_translation(language, 'Open Maps')}\")"
+                    if row["Latitude"] != _get_translation(language, "N/A")
+                    and row["Longitude"] != _get_translation(language, "N/A")
+                    else _get_translation(language, "N/A")
                 ),
                 axis=1,
             ),
         )
 
-        df_with_nav.to_excel(writer, index=False, sheet_name="Cleanup Manifest")
-        worksheet = writer.sheets["Cleanup Manifest"]
+        # Rename columns to translated names
+        column_mapping = {
+            col: _get_translation(language, col) for col in df_with_nav.columns
+        }
+        df_with_nav = df_with_nav.rename(columns=column_mapping)
+
+        sheet_name = _get_translation(language, "Cleanup Manifest")
+        df_with_nav.to_excel(writer, index=False, sheet_name=sheet_name)
+        worksheet = writer.sheets[sheet_name]
 
         # Setup table dimensions
         max_row = len(df_with_nav) + 1
@@ -317,16 +314,21 @@ def create_excel_file(data: list[dict]) -> BytesIO:
             cell.alignment = header_alignment
             cell.border = header_border
 
-        # Get indices of unlocked columns
+        # Get indices of unlocked columns (using translated names)
         unlocked_columns = []
+        translated_field_notes = _get_translation(language, "Field Notes")
+        translated_cleanup_status = _get_translation(language, "Cleanup Status")
+
         for idx, col_name in enumerate(df_with_nav.columns, 1):
-            if col_name in ["Field Notes", "Cleanup Status"]:
+            if col_name in [translated_field_notes, translated_cleanup_status]:
                 unlocked_columns.append(idx)
 
         # Apply number format to Confidence column and add conditional formatting
         confidence_col_idx = None
+        translated_confidence = _get_translation(language, "Confidence (%)")
+
         for idx, col_name in enumerate(df_with_nav.columns, 1):
-            if col_name == "Confidence (%)":
+            if col_name == translated_confidence:
                 confidence_col_idx = idx
                 column_letter = get_column_letter(idx)
 
@@ -358,7 +360,12 @@ def create_excel_file(data: list[dict]) -> BytesIO:
 
                 # Make hyperlinks blue
                 column_name = str(worksheet.cell(row=1, column=col_idx).value)
-                if ("URL" in column_name or "Navigation" in column_name) and cell.value:
+                translated_url = _get_translation(language, "URL")
+                translated_nav = _get_translation(language, "Navigation")
+
+                if (
+                    translated_url in column_name or translated_nav in column_name
+                ) and cell.value:
                     if isinstance(cell.value, str) and cell.value.startswith(
                         "=HYPERLINK"
                     ):
