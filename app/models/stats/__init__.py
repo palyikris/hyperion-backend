@@ -10,4 +10,6 @@ from .StatsSummaryResponse import (
     ProcessingTime,
     MeanTimeToProcess,
     HotspotDensity,
+    FunFact,
+    FunFactsResponse,
 )

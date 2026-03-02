@@ -58,6 +58,20 @@ class HotspotDensity(BaseModel):
     high_confidence_media_count: int = Field(ge=0, description="Media items with >=80% confidence")
 
 
+class FunFact(BaseModel):
+    """A single fun fact with title, fact text, and icon."""
+
+    title: str
+    fact: str
+    icon: str
+
+
+class FunFactsResponse(BaseModel):
+    """Response wrapper for fun facts endpoint."""
+
+    facts: List[FunFact]
+
+
 class TrashCompositionResponse(BaseModel):
     """Response wrapper for trash composition endpoint."""
     items: List[TrashCompositionItem]
