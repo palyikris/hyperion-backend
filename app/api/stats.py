@@ -1,7 +1,7 @@
 import asyncio
 
 from fastapi import APIRouter, Depends, Query, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -26,6 +26,8 @@ from app.api.stats_utils import (
     get_mean_time_to_process,
     get_hotspot_density,
     get_fun_facts,
+    generate_manifest_data,
+    create_excel_file,
 )
 
 router = APIRouter()
@@ -353,3 +355,78 @@ async def get_fun_facts_endpoint(
     """
     facts = await get_fun_facts(db, current_user.id, lang, limit)
     return FunFactsResponse(facts=facts)
+
+
+# ==============================================================================
+# EXCEL REPORT ENDPOINT
+# ==============================================================================
+
+
+@router.get(
+    "/stats/reports/manifest",
+    status_code=status.HTTP_200_OK,
+)
+async def get_cleanup_manifest_report(
+    days: int = Query(
+        default=30,
+        ge=1,
+        le=365,
+        description="Time window in days for the report (1-365)",
+    ),
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """
+    GET /api/stats/reports/manifest - Geospatial Cleanup Manifest (Excel Export)
+
+    Generates a comprehensive Excel report containing detailed information about
+    all trash detections for the authenticated user within the specified time window.
+
+    Each row in the report represents a single detection with complete metadata:
+    - Core Identification: Media ID, Detection ID, Filename
+    - Geospatial Data: Latitude, Longitude, Drone Altitude, Address
+    - AI Insights: Object Label, Confidence (%), Area (sqm)
+    - Forensics: Camera Make, Model, Date Taken (from EXIF)
+    - Audit & Verification: Assigned Titan (worker), Image URL, Upload Date
+
+    Authentication:
+        Requires valid session cookie (access_token)
+
+    Query Parameters:
+        - days (int, default=30): Number of days to look back from now (1-365)
+
+    Security:
+        - All data is strictly filtered by uploader_id (current user)
+        - Only includes READY media (successfully processed)
+        - No cross-user data leakage
+
+    Response:
+        - Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+        - Content-Disposition: attachment; filename="Hyperion_Cleanup_Manifest.xlsx"
+        - Binary Excel file (.xlsx) for download
+
+    Use Cases:
+        - Cleanup verification and operational planning
+        - Environmental audits and compliance reporting
+        - Data export for external analysis tools
+        - Forensic analysis of detection patterns
+
+    Performance Notes:
+        - Uses eager loading (selectinload) to minimize database queries
+        - Generates Excel file in memory (no disk I/O on server)
+        - Supports large datasets through efficient pandas processing
+    """
+    # Generate flattened data (one row per detection)
+    manifest_data = await generate_manifest_data(db, current_user.id, days)
+
+    # Convert to Excel file in memory
+    excel_buffer = create_excel_file(manifest_data)
+
+    # Return as downloadable Excel file
+    return Response(
+        content=excel_buffer.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": "attachment; filename=Hyperion_Cleanup_Manifest.xlsx"
+        },
+    )

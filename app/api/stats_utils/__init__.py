@@ -16,6 +16,12 @@ from app.api.stats_utils.kpi_processing_time import get_mean_time_to_process
 from app.api.stats_utils.kpi_hotspot_density import get_hotspot_density
 from app.api.stats_utils.fun_facts import get_fun_facts
 
+# Reports
+from app.api.stats_utils.report_manifest import (
+    generate_manifest_data,
+    create_excel_file,
+)
+
 __all__ = [
     # Cache
     "get_cached_stats",
@@ -29,4 +35,7 @@ __all__ = [
     "get_mean_time_to_process",
     "get_hotspot_density",
     "get_fun_facts",
+    # Reports
+    "generate_manifest_data",
+    "create_excel_file",
 ]
