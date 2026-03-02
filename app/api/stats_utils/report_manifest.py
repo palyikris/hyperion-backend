@@ -411,8 +411,13 @@ def create_excel_file(data: list[dict], language: str = "en") -> BytesIO:
         worksheet.auto_filter.ref = worksheet.dimensions
         worksheet.freeze_panes = "A2"
 
-        # Enable sheet protection (without password)
+        # Enable sheet protection with specific permissions
+        # Allow filtering, sorting, and selections while keeping cells locked
         worksheet.protection.sheet = True
+        worksheet.protection.autoFilter = True
+        worksheet.protection.sort = True
+        worksheet.protection.selectLockedCells = True
+        worksheet.protection.selectUnlockedCells = True
         worksheet.protection.enable()
 
     buffer.seek(0)
