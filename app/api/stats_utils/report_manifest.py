@@ -159,7 +159,7 @@ async def generate_manifest_data(
 
 import pandas as pd
 from io import BytesIO
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side, Protection
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.formatting.rule import ColorScaleRule
 
@@ -230,7 +230,7 @@ def _get_translation(language: str, key: str) -> str:
 
 def create_excel_file(data: list[dict], language: str = "en") -> BytesIO:
     """
-    Advanced Excel generator with Hyperion branding, filters, and cell protection.
+    Advanced Excel generator with Hyperion branding and filters.
 
     Supports English and Hungarian output (fallback: English).
 
@@ -238,7 +238,6 @@ def create_excel_file(data: list[dict], language: str = "en") -> BytesIO:
     - Manifest worksheet with Hyperion Indigo styling
     - Google Maps navigation hyperlinks
     - 3-color scale conditional formatting on Confidence column
-    - Sheet protection (Field Notes and Cleanup Status unlocked)
 
     Args:
         data: List of detection dictionaries
@@ -314,15 +313,6 @@ def create_excel_file(data: list[dict], language: str = "en") -> BytesIO:
             cell.alignment = header_alignment
             cell.border = header_border
 
-        # Get indices of unlocked columns (using translated names)
-        unlocked_columns = []
-        translated_field_notes = _get_translation(language, "Field Notes")
-        translated_cleanup_status = _get_translation(language, "Cleanup Status")
-
-        for idx, col_name in enumerate(df_with_nav.columns, 1):
-            if col_name in [translated_field_notes, translated_cleanup_status]:
-                unlocked_columns.append(idx)
-
         # Apply number format to Confidence column and add conditional formatting
         confidence_col_idx = None
         translated_confidence = _get_translation(language, "Confidence (%)")
@@ -348,7 +338,7 @@ def create_excel_file(data: list[dict], language: str = "en") -> BytesIO:
                 )
                 break
 
-        # Apply formatting and protection to all cells
+        # Apply formatting to all cells
         for row_idx in range(2, max_row + 1):
             for col_idx in range(1, max_col + 1):
                 cell = worksheet.cell(row=row_idx, column=col_idx)
@@ -380,17 +370,6 @@ def create_excel_file(data: list[dict], language: str = "en") -> BytesIO:
                         start_color="F9FAFB", end_color="F9FAFB", fill_type="solid"
                     )
 
-                # Set protection: unlock only Field Notes and Cleanup Status
-                if col_idx in unlocked_columns:
-                    cell.protection = Protection(locked=False)
-                else:
-                    cell.protection = Protection(locked=True)
-
-        # Also unprotect headers for unlocked columns
-        for col_idx in unlocked_columns:
-            header_cell = worksheet.cell(row=1, column=col_idx)
-            header_cell.protection = Protection(locked=False)
-
         # Intelligent column width formatting
         for idx, column in enumerate(worksheet.columns, 1):
             column_name = str(column[0].value)
@@ -410,15 +389,6 @@ def create_excel_file(data: list[dict], language: str = "en") -> BytesIO:
         # Enable AutoFilters & Freeze Panes
         worksheet.auto_filter.ref = worksheet.dimensions
         worksheet.freeze_panes = "A2"
-
-        # Enable sheet protection with specific permissions
-        # Allow filtering, sorting, and selections while keeping cells locked
-        worksheet.protection.sheet = True
-        worksheet.protection.autoFilter = True
-        worksheet.protection.sort = True
-        worksheet.protection.selectLockedCells = True
-        worksheet.protection.selectUnlockedCells = True
-        worksheet.protection.enable()
 
     buffer.seek(0)
     return buffer
