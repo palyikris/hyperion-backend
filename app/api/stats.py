@@ -621,7 +621,7 @@ async def get_statistics_pdf_report(
         if language == "en"
         else "Hyperion_Statisztikai_Jelentés"
     )
-    filename = f"Hyperion_{report_label}_{timestamp}.pdf"
+    filename = f"{report_label}_{timestamp}.pdf"
 
     # ------------------------------------------------------------------
     # RETURN PDF AS DOWNLOADABLE RESPONSE
