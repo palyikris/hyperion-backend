@@ -616,7 +616,11 @@ async def get_statistics_pdf_report(
     from datetime import datetime
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    report_label = "Hyperion_Statistics_Report"
+    report_label = (
+        "Hyperion_Statistics_Report"
+        if language == "en"
+        else "Hyperion_Statisztikai_Jelentés"
+    )
     filename = f"Hyperion_{report_label}_{timestamp}.pdf"
 
     # ------------------------------------------------------------------
