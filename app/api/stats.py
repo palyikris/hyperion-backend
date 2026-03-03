@@ -440,5 +440,9 @@ async def get_cleanup_manifest_report(
     return Response(
         content=excel_buffer.getvalue(),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f"attachment; filename={filename}"},
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "X-Report-Filename": filename,
+            "Access-Control-Expose-Headers": "Content-Disposition, X-Report-Filename",
+        },
     )
