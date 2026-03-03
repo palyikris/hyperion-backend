@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>Hyperion Impact Manifest</title>
+    <style>
+        /* PDF Engine Optimization */
+        @page {
+            size: A4;
+            margin: 0;
+        }
+        body {
+            font-family: 'Helvetica', 'Arial', sans-serif;
+            background-color: #F8F9F4; /* Cream */
+            color: #4B5563; /* Slate Grey */
+            margin: 0;
+            padding: 0;
+            -webkit-print-color-adjust: exact;
+        }
+
+        /* --- Global Header: Deep Sea --- */
+        .header {
+            background-color: #1A5F54; /* Deep Sea */
+            color: #F8F9F4; /* Cream */
+            padding: 50px 50px 30px 50px;
+            border-bottom: 8px solid #C9A66B; /* Muted Gold Accent */
+        }
+
+        .header-subtitle {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 4px;
+            color: #8FCACA; /* Sage Mint */
+            margin-bottom: 8px;
+            font-weight: bold;
+        }
+
+        .header h1 {
+            font-size: 40px;
+            margin: 0;
+            letter-spacing: -1.5px;
+            font-weight: 900;
+            line-height: 1;
+            color: #F8F9F4;
+        }
+
+        /* --- Meta Strip --- */
+        .meta-strip {
+            background-color: #2D4A3E; /* Forest */
+            color: #A8DADC; /* Cool Aqua */
+            padding: 12px 50px;
+            font-size: 10px;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .meta-item { margin-right: 35px; display: inline-block; }
+
+        /* --- Main Content --- */
+        .content {
+            padding: 35px 50px;
+        }
+
+        /* --- Bento-Style KPI Grid (Table-based for PDF stability) --- */
+        .kpi-table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 15px 0;
+            margin-left: -15px;
+            margin-bottom: 30px;
+        }
+
+        .kpi-card {
+            background-color: #ffffff;
+            border: 1px solid #E5E7EB;
+            border-radius: 12px;
+            padding: 20px;
+            width: 33.33%;
+            vertical-align: top;
+        }
+
+        .kpi-label {
+            font-size: 9px;
+            text-transform: uppercase;
+            color: #4B5563;
+            letter-spacing: 1.5px;
+            margin-bottom: 8px;
+            display: block;
+            font-weight: bold;
+        }
+
+        .kpi-value {
+            font-size: 30px;
+            font-weight: 900;
+            color: #1A5F54;
+            line-height: 1.1;
+        }
+
+        /* --- Section Headers --- */
+        .section-header {
+            margin: 30px 0 15px 0;
+            border-left: 5px solid #D97B5A; /* Burnt Orange Accent */
+            padding-left: 15px;
+        }
+
+        .section-header h2 {
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            color: #1A5F54;
+            margin: 0;
+            font-weight: 900;
+        }
+
+        /* --- Data Display Box --- */
+        .data-box {
+            background-color: #ffffff;
+            border-radius: 14px;
+            border: 1px solid #E5E7EB;
+            overflow: hidden;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+        }
+
+        table.data-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        table.data-table th {
+            background-color: #F8F9F4;
+            color: #4B5563;
+            font-size: 9px;
+            text-transform: uppercase;
+            text-align: left;
+            padding: 15px 20px;
+            border-bottom: 2px solid #E5E7EB;
+        }
+
+        table.data-table td {
+            padding: 15px 20px;
+            font-size: 12px;
+            border-bottom: 1px solid #E5E7EB;
+            color: #2D4A3E;
+        }
+
+        table.data-table tr:last-child td { border-bottom: none; }
+
+        /* --- Visual Gauges --- */
+        .gauge-track {
+            width: 100px;
+            height: 6px;
+            background-color: #CDEFEF; /* Soft Sky */
+            border-radius: 10px;
+            display: inline-block;
+            vertical-align: middle;
+            margin-right: 12px;
+        }
+
+        .gauge-fill {
+            height: 6px;
+            background-color: #1A5F54;
+            border-radius: 10px;
+        }
+
+        .status-pill {
+            background-color: #A8DADC; /* Cool Aqua */
+            color: #1A5F54;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 10px;
+            font-weight: 900;
+        }
+
+        /* --- Footer --- */
+        .footer {
+            background-color: #1A5F54;
+            color: #F8F9F4;
+            padding: 40px 50px;
+            text-align: center;
+        }
+
+        .footer-brand {
+            font-size: 20px;
+            font-weight: 900;
+            letter-spacing: 5px;
+            color: #8FCACA;
+        }
+
+        .footer-text {
+            font-size: 9px;
+            opacity: 0.6;
+            letter-spacing: 1px;
+            line-height: 1.8;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Impact Manifest</h1>
+    </div>
+
+    <div class="meta-strip">
+        <div class="meta-item">Report ID: {{ generated_at }}</div>
+        <span style="margin: 0 1rem;"></span>
+        <div class="meta-item">Horizon: {{ days_window }} Days</div>
+    </div>
+
+    <div class="content">
+        <table class="kpi-table">
+            <tr>
+                <td class="kpi-card">
+                    <span class="kpi-label">Detections</span>
+                    <span class="kpi-value">{{ total_detections }}</span>
+                </td>
+                <td class="kpi-card" style="border-top: 4px solid #D97B5A;">
+                    <span class="kpi-label">Total Area (m²)</span>
+                    <span class="kpi-value">{{ total_area_sqm }}</span>
+                </td>
+                <td class="kpi-card">
+                    <span class="kpi-label">Hotspot Density</span>
+                    <span class="kpi-value">{{ hotspot_count }}</span>
+                </td>
+            </tr>
+        </table>
+
+        <div class="section-header">
+            <h2>Analytical Composition</h2>
+        </div>
+        <div class="data-box">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Material Type</th>
+                        <th>Volume Gauge</th>
+                        <th style="text-align: right;">Distribution</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in trash_composition_items %}
+                    <tr>
+                        <td style="font-weight: bold; text-transform: uppercase;">{{ item.label }}</td>
+                        <td>
+                            <div class="gauge-track">
+                                <div class="gauge-fill" style="width: {{ item.percentage }}%;"></div>
+                            </div>
+                            <span style="font-size: 10px; color: #4B5563;">{{ item.count }} units</span>
+                        </td>
+                        <td style="text-align: right;">
+                            <span class="status-pill">{{ item.percentage }}%</span>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <div class="section-header">
+            <h2>Temporal Pulse</h2>
+        </div>
+        <div class="data-box">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Observation Date</th>
+                        <th style="text-align: right;">Activity Count</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in temporal_trends_items %}
+                    <tr>
+                        <td>{{ item.date }}</td>
+                        <td style="text-align: right; font-weight: 900; color: #1A5F54;">
+                            + {{ item.count }}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="footer">
+        <div class="footer-brand">HYPERION</div>
+        <div class="footer-text">
+            CONFIDENTIAL ARCHIVE | GENERATED ON {{ generated_at }}
+        </div>
+    </div>
+</body>
+</html>

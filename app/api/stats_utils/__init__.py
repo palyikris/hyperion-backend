@@ -21,6 +21,7 @@ from app.api.stats_utils.report_manifest import (
     generate_manifest_data,
     create_excel_file,
 )
+from app.api.stats_utils.report_pdf import create_pdf_report
 
 __all__ = [
     # Cache
@@ -38,4 +39,5 @@ __all__ = [
     # Reports
     "generate_manifest_data",
     "create_excel_file",
+    "create_pdf_report",
 ]

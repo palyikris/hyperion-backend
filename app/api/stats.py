@@ -28,6 +28,7 @@ from app.api.stats_utils import (
     get_fun_facts,
     generate_manifest_data,
     create_excel_file,
+    create_pdf_report,
 )
 
 router = APIRouter()
@@ -440,6 +441,203 @@ async def get_cleanup_manifest_report(
     return Response(
         content=excel_buffer.getvalue(),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "X-Report-Filename": filename,
+            "Access-Control-Expose-Headers": "Content-Disposition, X-Report-Filename",
+        },
+    )
+
+
+# ==============================================================================
+# PDF REPORT ENDPOINT
+# ==============================================================================
+
+
+@router.get(
+    "/stats/reports/pdf",
+    status_code=status.HTTP_200_OK,
+)
+async def get_statistics_pdf_report(
+    days: int = Query(
+        default=7,
+        ge=1,
+        le=365,
+        description="Time window in days for temporal data (1-365)",
+    ),
+    language: str = Query(
+        default="en",
+        regex="^(en|hu)$",
+        description="Language for the report: 'en' (English) or 'hu' (Hungarian)",
+    ),
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """
+    GET /api/stats/reports/pdf - Comprehensive Statistics PDF Report
+
+    Generates a professional, beautifully formatted PDF report containing all
+    statistics KPIs for the authenticated user. The report includes all 6 key
+    performance indicators with Hyperion branding and styling.
+
+    Authentication:
+        Requires valid session cookie (access_token)
+
+    Query Parameters:
+        - days (int, default=7): Time window for temporal data (1-365 days)
+          Only affects Temporal Trends KPI. Other KPIs use all-time data.
+        - language (str, default="en"): Report language ("en" or "hu")
+
+    Report Contents:
+        1. Trash Composition: Distribution of trash types detected
+        2. Environmental Footprint: Total area and detection count
+        3. AI Fleet Efficiency: Worker success rates and reliability
+        4. Temporal Trends: Detection counts over specified time window
+        5. Mean Time to Process: Average processing duration by worker
+        6. Hotspot Density: High-confidence detection zones
+
+    Data Aggregation:
+        - Fetches all KPI data in parallel for performance
+        - Caches available statistics when possible
+        - User-scoped (no cross-user data leakage)
+
+    Response:
+        - Content-Type: application/pdf
+        - Content-Disposition: attachment; filename="Hyperion_Statistics_Report_*.pdf"
+        - Binary PDF file for download
+
+    Features:
+        - Hyperion brand color scheme and styling
+        - Page numbers and generation timestamp
+        - Bilingual support (English and Hungarian)
+        - Professional table formatting
+        - Summary statistics and metrics
+
+    Use Cases:
+        - Dashboard reporting and analytics export
+        - Stakeholder presentations
+        - Performance tracking and audit trails
+        - Data analysis and external reporting
+
+    Performance Notes:
+        - Generates PDF in memory (no disk I/O on server)
+        - Parallel query execution for KPI data fetching
+        - Supports large datasets efficiently
+    """
+    # ------------------------------------------------------------------
+    # FETCH ALL KPIs IN PARALLEL (same as summary endpoint)
+    # ------------------------------------------------------------------
+    user_id = current_user.id
+
+    (
+        trash_composition,  # KPI 1
+        environmental_footprint,  # KPI 2
+        ai_fleet_efficiency,  # KPI 3
+        temporal_trends,  # KPI 4
+        mean_time_to_process,  # KPI 5
+        hotspot_density,  # KPI 6
+    ) = await asyncio.gather(
+        get_trash_composition(db, user_id),
+        get_environmental_footprint(db, user_id),
+        get_ai_fleet_efficiency(db, user_id),
+        get_temporal_trends(db, user_id, days),
+        get_mean_time_to_process(db, user_id),
+        get_hotspot_density(db, user_id),
+    )
+
+    # ------------------------------------------------------------------
+    # BUILD STATISTICS DATA DICTIONARY
+    # ------------------------------------------------------------------
+    # Structure data properly for PDF generator (must wrap all KPIs in proper dicts)
+
+    # KPI 1: Trash Composition - wrap list in object with items & total
+    # Convert Pydantic models to dicts if needed
+    trash_items = [
+        item.model_dump(mode="json") if hasattr(item, "model_dump") else item
+        for item in trash_composition
+    ]
+    trash_comp_total = sum(item.count for item in trash_composition)
+    trash_comp_dict = {"items": trash_items, "total_detections": trash_comp_total}
+
+    # KPI 2: Environmental Footprint - already Pydantic model
+    fp_dict = (
+        environmental_footprint.model_dump(mode="json")
+        if hasattr(environmental_footprint, "model_dump")
+        else environmental_footprint
+    )
+
+    # KPI 3: AI Fleet Efficiency - already Pydantic model
+    afe_dict = (
+        ai_fleet_efficiency.model_dump(mode="json")
+        if hasattr(ai_fleet_efficiency, "model_dump")
+        else ai_fleet_efficiency
+    )
+
+    # KPI 4: Temporal Trends - list of trends, needs wrapping
+    # Convert trend objects to dicts if needed
+    trend_items = [
+        trend.model_dump(mode="json") if hasattr(trend, "model_dump") else trend
+        for trend in temporal_trends
+    ]
+    temporal_trends_dict = {"trends": trend_items, "days_window": days}
+
+    # KPI 5: Mean Time to Process - already Pydantic model
+    mttp_dict = (
+        mean_time_to_process.model_dump(mode="json")
+        if hasattr(mean_time_to_process, "model_dump")
+        else mean_time_to_process
+    )
+
+    # KPI 6: Hotspot Density - already Pydantic model
+    hd_dict = (
+        hotspot_density.model_dump(mode="json")
+        if hasattr(hotspot_density, "model_dump")
+        else hotspot_density
+    )
+
+    stats_dict = {
+        "trash_composition": trash_comp_dict,
+        "environmental_footprint": fp_dict,
+        "ai_fleet_efficiency": afe_dict,
+        "temporal_trends": temporal_trends_dict,
+        "mean_time_to_process": mttp_dict,
+        "hotspot_density": hd_dict,
+        "days_window": days,
+    }
+
+    # ------------------------------------------------------------------
+    # GENERATE PDF REPORT
+    # ------------------------------------------------------------------
+    pdf_buffer = await create_pdf_report(stats_dict, language=language)
+
+    # ------------------------------------------------------------------
+    # GENERATE PDF REPORT
+    # ------------------------------------------------------------------
+    pdf_buffer = await create_pdf_report(stats_dict, language=language)
+
+    # ------------------------------------------------------------------
+    # GENERATE PDF REPORT
+    # ------------------------------------------------------------------
+    pdf_buffer = await create_pdf_report(stats_dict, language=language)
+
+    # ------------------------------------------------------------------
+    # GENERATE TIMESTAMPED FILENAME
+    # ------------------------------------------------------------------
+    from datetime import datetime
+    from app.api.stats_utils.pdf.translations import (
+        get_translation as _get_pdf_translation,
+    )
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    report_label = _get_pdf_translation(language, "title").replace(" ", "_")
+    filename = f"Hyperion_{report_label}_{timestamp}.pdf"
+
+    # ------------------------------------------------------------------
+    # RETURN PDF AS DOWNLOADABLE RESPONSE
+    # ------------------------------------------------------------------
+    return Response(
+        content=pdf_buffer.getvalue(),
+        media_type="application/pdf",
         headers={
             "Content-Disposition": f'attachment; filename="{filename}"',
             "X-Report-Filename": filename,
