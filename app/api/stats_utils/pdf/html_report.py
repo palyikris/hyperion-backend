@@ -5,6 +5,9 @@ HTML-based PDF report generator using Jinja2 templates and xhtml2pdf.
 from io import BytesIO
 from datetime import datetime
 from typing import Any
+import base64
+from functools import lru_cache
+from urllib.request import urlopen
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from xhtml2pdf import pisa
@@ -12,6 +15,21 @@ import os
 
 # Get the directory where this file is located
 TEMPLATE_DIR = os.path.dirname(os.path.abspath(__file__))
+LOGO_URL = "https://hyperion-frontend-blond.vercel.app/logo.png"
+
+
+@lru_cache(maxsize=1)
+def _get_logo_src() -> str:
+    """Return embedded logo data URI; fallback to URL if fetch fails."""
+    try:
+        with urlopen(LOGO_URL, timeout=10) as response:
+            logo_bytes = response.read()
+        if not logo_bytes:
+            return LOGO_URL
+        encoded = base64.b64encode(logo_bytes).decode("ascii")
+        return f"data:image/png;base64,{encoded}"
+    except Exception:
+        return LOGO_URL
 
 
 async def create_pdf_report(
@@ -31,7 +49,7 @@ async def create_pdf_report(
     template_data = _prepare_template_data(stats_data, language)
 
     # Render HTML from template
-    html_content = _render_template(template_data)
+    html_content = _render_template(template_data, language)
 
     # Convert HTML to PDF
     pdf_bytes = _html_to_pdf(html_content)
@@ -62,7 +80,7 @@ def _prepare_template_data(stats_data: dict[str, Any], language: str) -> dict:
     temporal_data = stats_data.get("temporal_trends", {})
     trends = temporal_data.get("trends", [])
     days_window = temporal_data.get("days_window", 7)
-    
+
     temporal_items = []
     for trend in trends[-7:]:  # Last 7 items
         temporal_items.append({
@@ -70,16 +88,10 @@ def _prepare_template_data(stats_data: dict[str, Any], language: str) -> dict:
             "count": trend.get("count", 0),
         })
 
-    # Language mapping
-    language_names = {
-        "en": "English",
-        "hu": "Hungarian",
-    }
-
     return {
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "days_window": days_window,
-        "language_name": language_names.get(language, "English"),
+        "logo_src": _get_logo_src(),
         "trash_composition_items": trash_items,
         "total_detections": total,
         "total_area_sqm": f"{float(total_area_sqm):,.2f}",
@@ -88,7 +100,7 @@ def _prepare_template_data(stats_data: dict[str, Any], language: str) -> dict:
     }
 
 
-def _render_template(data: dict) -> str:
+def _render_template(data: dict, language: str) -> str:
     """Render HTML template with provided data."""
     env = Environment(
         loader=FileSystemLoader(TEMPLATE_DIR),
@@ -97,7 +109,10 @@ def _render_template(data: dict) -> str:
         lstrip_blocks=True,
     )
 
-    template = env.get_template("report_template.html")
+    template_name = (
+        "report_template_en.html" if language == "en" else "report_template.html"
+    )
+    template = env.get_template(template_name)
     return template.render(**data)
 
 

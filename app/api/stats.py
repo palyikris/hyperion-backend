@@ -611,25 +611,12 @@ async def get_statistics_pdf_report(
     pdf_buffer = await create_pdf_report(stats_dict, language=language)
 
     # ------------------------------------------------------------------
-    # GENERATE PDF REPORT
-    # ------------------------------------------------------------------
-    pdf_buffer = await create_pdf_report(stats_dict, language=language)
-
-    # ------------------------------------------------------------------
-    # GENERATE PDF REPORT
-    # ------------------------------------------------------------------
-    pdf_buffer = await create_pdf_report(stats_dict, language=language)
-
-    # ------------------------------------------------------------------
     # GENERATE TIMESTAMPED FILENAME
     # ------------------------------------------------------------------
     from datetime import datetime
-    from app.api.stats_utils.pdf.translations import (
-        get_translation as _get_pdf_translation,
-    )
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    report_label = _get_pdf_translation(language, "title").replace(" ", "_")
+    report_label = "Hyperion_Statistics_Report"
     filename = f"Hyperion_{report_label}_{timestamp}.pdf"
 
     # ------------------------------------------------------------------

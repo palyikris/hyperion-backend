@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html lang="hu">
+<html lang="en">
 <head>
     <meta charset="UTF-8" />
-    <title>Hyperion Hatás Manifesztó</title>
+    <title>Hyperion Impact Manifest</title>
     <style>
         @page {
             size: A4;
@@ -213,45 +213,45 @@
                 <img class="header-logo" src="{{ logo_src }}" alt="Hyperion Logo" />
             </div>
             <div class="header-title-cell">
-                <h1>Hat&aacute;smanifeszt&oacute;</h1>
+                <h1>Impact Manifest</h1>
             </div>
         </div>
     </div>
 
     <div class="meta-strip">
-        <div class="meta-item">Jelent&eacute;s ID: {{ generated_at }}</div>
+        <div class="meta-item">Report ID: {{ generated_at }}</div>
         <span style="margin: 0 1rem;"></span>
-        <div class="meta-item">Horizont: {{ days_window }} nap</div>
+        <div class="meta-item">Horizon: {{ days_window }} Days</div>
     </div>
 
     <div class="content">
         <table class="kpi-table">
             <tr>
                 <td class="kpi-card">
-                    <span class="kpi-label">Detekt&aacute;l&aacute;sok</span>
+                    <span class="kpi-label">Detections</span>
                     <span class="kpi-value">{{ total_detections }}</span>
                 </td>
                 <td class="kpi-card" style="border-top: 4px solid #D97B5A;">
-                    <span class="kpi-label">Teljes ter&uuml;let (m&sup2;)</span>
+                    <span class="kpi-label">Total Area (m²)</span>
                     <span class="kpi-value">{{ total_area_sqm }}</span>
                 </td>
                 <td class="kpi-card">
-                    <span class="kpi-label">Hotspotok száma</span>
+                    <span class="kpi-label">Hotspot Density</span>
                     <span class="kpi-value">{{ hotspot_count }}</span>
                 </td>
             </tr>
         </table>
 
         <div class="section-header">
-            <h2>Analitikai &ouml;sszet&eacute;tel</h2>
+            <h2>Analytical Composition</h2>
         </div>
         <div class="data-box">
             <table class="data-table">
                 <thead>
                     <tr>
-                        <th>Anyagt&iacute;pus</th>
-                        <th>Darab</th>
-                        <th style="text-align: right;">Eloszl&aacute;s</th>
+                        <th>Material Type</th>
+                        <th>Volume Gauge</th>
+                        <th style="text-align: right;">Distribution</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -262,7 +262,7 @@
                             <div class="gauge-track">
                                 <div class="gauge-fill" style="width: {{ item.percentage }}%;"></div>
                             </div>
-                            <span style="font-size: 10px; color: #4B5563;">{{ item.count }} egys&eacute;g</span>
+                            <span style="font-size: 10px; color: #4B5563;">{{ item.count }} units</span>
                         </td>
                         <td style="text-align: right;">
                             <span class="status-pill">{{ item.percentage }}%</span>
@@ -274,14 +274,14 @@
         </div>
 
         <div class="section-header">
-            <h2>Temporális v&aacute;ltoz&aacute;s</h2>
+            <h2>Temporal Pulse</h2>
         </div>
         <div class="data-box">
             <table class="data-table">
                 <thead>
                     <tr>
-                        <th>Megfigyel&eacute;s d&aacute;tuma</th>
-                        <th style="text-align: right;">Aktivit&aacute;s sz&aacute;ma</th>
+                        <th>Observation Date</th>
+                        <th style="text-align: right;">Activity Count</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -300,8 +300,9 @@
 
     <div class="footer">
         <img class="footer-logo" src="{{ logo_src }}" alt="Hyperion Logo" />
+        <div class="footer-brand">HYPERION</div>
         <div class="footer-text">
-            BIZALMAS ARCH&Iacute;VUM | GENER&Aacute;LVA {{ generated_at }}
+            CONFIDENTIAL ARCHIVE | GENERATED ON {{ generated_at }}
         </div>
     </div>
 </body>
