@@ -1,6 +1,6 @@
 # using a slim Python image for a smaller footprint
 # NOTE: Ensure your PostgreSQL database uses postgis/postgis:latest image for PostGIS support
-FROM python:3.10-slim
+FROM python:3.11-slim
 
 WORKDIR /app
 
