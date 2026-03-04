@@ -12,7 +12,7 @@ from fastapi import (
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.api.deps import get_current_user, get_current_user_from_token
-from app.api.media_log_utils import create_status_change_log
+from app.api.medialog_utils.media_log_utils import create_status_change_log
 from app.models.db.Media import Media
 from app.models.upload.MediaStatus import MediaStatus
 from app.api.upload_utils.conn_manager import worker_signal, manager

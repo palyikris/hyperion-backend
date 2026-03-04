@@ -10,6 +10,7 @@ from app.api import upload
 from app.api import vault
 from app.api import map
 from app.api import stats
+from app.api import lab
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.dashboard_utils.ux import track_ux_metrics
 from app.api.dashboard_utils.utils.init_workers import initialize_worker_fleet
@@ -60,6 +61,7 @@ app.include_router(upload.router, prefix="/api/upload", tags=["Media Upload"])
 app.include_router(vault.router, prefix="/api", tags=["Media Vault"])
 app.include_router(map.router, prefix="/api", tags=["Map Data"])
 app.include_router(stats.router, prefix="/api", tags=["Statistics"])
+app.include_router(lab.router, prefix="/api/lab", tags=["Lab"])
 
 
 @app.get("/")

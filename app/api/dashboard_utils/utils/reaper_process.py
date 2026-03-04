@@ -2,7 +2,7 @@ import asyncio
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import select, update, or_
 from app.database import AsyncSessionLocal
-from app.api.media_log_utils import create_status_change_log
+from app.api.medialog_utils.media_log_utils import create_status_change_log
 from app.models.db.Media import Media
 from app.models.db.MediaLog import MediaLog
 from app.models.db.AIWorker import AIWorkerState

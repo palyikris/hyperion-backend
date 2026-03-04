@@ -5,7 +5,7 @@ from sqlalchemy.sql import text
 from geoalchemy2.functions import ST_DWithin, ST_SetSRID, ST_MakePoint
 from datetime import timedelta
 from app.database import AsyncSessionLocal
-from app.api.media_log_utils import create_status_change_log
+from app.api.medialog_utils.media_log_utils import create_status_change_log
 from app.models.db.Media import Media
 from app.models.db.AIWorker import AIWorkerState
 from app.models.upload.MediaStatus import MediaStatus
