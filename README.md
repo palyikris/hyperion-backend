@@ -58,6 +58,21 @@ FastAPI backend for the Hyperion platform, providing user authentication, dashbo
 - **Media Log Timeline**: Fetch per-media processing history for map-selected items
 - **Short-Lived Map Stats Cache**: 60-second in-memory cache for repeated stats queries
 
+### Statistics & Reporting
+- **6 KPI Endpoints** for authenticated users:
+  - Trash Composition (`/api/stats/trash-composition`)
+  - Environmental Footprint (`/api/stats/environmental-footprint`)
+  - AI Fleet Efficiency (`/api/stats/ai-fleet-efficiency`)
+  - Temporal Trends (`/api/stats/temporal-trends?days=1..365`)
+  - Mean Time to Process (`/api/stats/mean-time-to-process`)
+  - Hotspot Density (`/api/stats/hotspot-density`)
+- **Unified Stats Summary**: `/api/stats/summary` aggregates all KPIs in a single response
+- **Parallel KPI Aggregation**: Summary/report endpoints fetch KPI data concurrently with `asyncio.gather`
+- **Stats Cache**: 5-minute in-memory cache for summary requests keyed by `(user_id, days)`
+- **Fun Facts API**: `/api/stats/fun-facts` with personalized insights, icon metadata, and bilingual output (`en`/`hu`)
+- **Excel Manifest Export**: `/api/stats/reports/manifest` generates detection-level `.xlsx` cleanup manifests (localized filename/header labels)
+- **PDF Report Export**: `/api/stats/reports/pdf` generates branded KPI reports in English or Hungarian
+
 ### Media Upload
 - **Batch File Upload**: Upload multiple image files simultaneously with automatic image dimension extraction (width, height, size)
 - **HuggingFace Integration**: Automatic upload to HuggingFace Hub with organized date-based directory structure
@@ -105,6 +120,7 @@ FastAPI backend for the Hyperion platform, providing user authentication, dashbo
 - **Media Storage**: HuggingFace Hub API integration for dataset uploads
 - **System Monitoring**: psutil (with container-aware cgroup support)
 - **Image Processing**: Pillow (PIL) for image dimension extraction
+- **Analytics & Reporting**: pandas + openpyxl (Excel manifest generation) + reportlab/xhtml2pdf (PDF reports)
 - **Utilities**: nanoid (ID generation), python-dotenv (environment config)
 
 ## Requirements
@@ -205,6 +221,18 @@ docker run --rm -p 7860:7860 --env-file .env hyperion-backend
 - `GET /api/map/stats` → Get grid-aggregated map stats (required query params: min_lat, max_lat, min_lng, max_lng; optional: resolution)
 - `GET /api/map/{id}/logs` → Get processing/log history for one media item
 
+#### Statistics & Reports
+- `GET /api/stats/trash-composition` → Trash label distribution with counts and percentages
+- `GET /api/stats/environmental-footprint` → Total detected area (`sqm`) and detection count
+- `GET /api/stats/ai-fleet-efficiency` → Per-worker success/failure metrics and fleet reliability score
+- `GET /api/stats/temporal-trends` → Daily detection trend series (`days` query param: `1..365`, default `7`)
+- `GET /api/stats/mean-time-to-process` → Overall and per-worker average processing duration
+- `GET /api/stats/hotspot-density` → High-confidence hotspot and media counts
+- `GET /api/stats/summary` → Combined response for all six KPIs (summary dashboard endpoint)
+- `GET /api/stats/fun-facts` → Personalized facts (`limit` query param: `1..5`, `lang`: `en|hu`)
+- `GET /api/stats/reports/manifest` → Download localized cleanup manifest Excel report (`days`: `1..365`, default `30`; `language`: `en|hu`)
+- `GET /api/stats/reports/pdf` → Download localized KPI PDF report (`days`: `1..365`, default `7`; `language`: `en|hu`)
+
 ## Notes
 
 - JWT access tokens expire in **30 minutes**; the login cookie is set for **60 minutes**
@@ -218,6 +246,9 @@ docker run --rm -p 7860:7860 --env-file .env hyperion-backend
 - Token blacklist is stored in the database for secure logout; all tokens checked against blacklist on authenticated requests
 - Request tracking middleware measures response times for all routes and maintains active user session pool
 - Media files uploaded to HuggingFace Hub with structure: `media/{user_id}/{YYYY-MM-DD}/{media_id}_{filename}`
+- Stats summary cache TTL is **300 seconds (5 minutes)** and cache keys are scoped by `(user_id, days)`
+- Statistics report endpoints support bilingual output via `language=en|hu` and return downloadable files with timestamped filenames
+- Temporal statistics windows use `days` constraints of **1..365** (`/api/stats/summary`, `/api/stats/temporal-trends`, `/api/stats/reports/*`)
 - Database migrations use Alembic and must be run before first startup: `alembic upgrade head`
 - All timestamps use UTC timezone internally (timezone.utc)
 - Auth cookie is set with `HttpOnly`, `SameSite=None`, and `Secure=True`; browser-based local development may require HTTPS or token-query fallback for WebSocket auth
