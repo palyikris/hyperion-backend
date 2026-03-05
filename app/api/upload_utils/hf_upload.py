@@ -14,17 +14,32 @@ HF_TOKEN = os.getenv("HF_TOKEN")
 HF_REPO_ID = os.getenv("HF_REPO_ID")
 
 
-async def delete_from_hf(hf_path: str) -> bool:
+async def delete_from_hf(hf_path: str, media_id: uuid.UUID) -> bool:
     """
     Delete a file from the Hugging Face dataset.
+    Only deletes if no other non-failed media reference this path (i.e., it's not a duplicate).
 
     Args:
         hf_path: The path of the file in the HF repo (e.g., media/user_id/date/filename)
+        media_id: The ID of the media being deleted
 
     Returns:
-        True if deletion succeeded, False otherwise
+        True if deletion succeeded or was skipped (duplicate), False on error
     """
     try:
+        # Check if other media reference this path (e.g., duplicates)
+        async with AsyncSessionLocal() as session:
+            other_refs = await session.execute(
+                select(Media).where(
+                    Media.hf_path == hf_path,
+                    Media.id != media_id,
+                    Media.status != MediaStatus.FAILED,
+                )
+            )
+            if other_refs.scalars().first():
+                # Other media still reference this file, don't delete
+                return True
+
         api = HfApi(token=HF_TOKEN)
         loop = asyncio.get_event_loop()
 

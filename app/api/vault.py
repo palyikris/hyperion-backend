@@ -133,7 +133,7 @@ async def delete_all_media(
     for media in media_items:
         # Delete from HF dataset if hf_path exists
         if media.hf_path:
-            await delete_from_hf(media.hf_path)
+            await delete_from_hf(media.hf_path, media.id)
 
         await db.delete(media)
         deleted_count += 1
@@ -169,7 +169,7 @@ async def delete_media(
 
     # Delete from HF dataset if hf_path exists
     if media.hf_path:
-        await delete_from_hf(media.hf_path)
+        await delete_from_hf(media.hf_path, media.id)
 
     await db.execute(
         update(Media)
