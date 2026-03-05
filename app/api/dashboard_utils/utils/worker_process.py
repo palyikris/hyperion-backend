@@ -299,7 +299,7 @@ async def ai_worker_process(name: str):
                             Media.status != MediaStatus.FAILED,
                             Media.location.isnot(None),
                             # Media.created_at >= forty_eight_hours_ago,
-                            Media.initial_metadata["filename"].astext
+                            Media.initial_metadata["filename"].as_string()
                             == (current_task.initial_metadata or {}).get(
                                 "filename", ""
                             ),
