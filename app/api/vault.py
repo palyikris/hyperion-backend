@@ -27,7 +27,7 @@ async def get_media_vault(
     order_by: str = Query(
         "created_at", description="Sort field: created_at, filename, or status"
     ),
-    direction: str = Query("desc", regex="^(asc|desc)$"),
+    direction: str = Query("desc", pattern="^(asc|desc)$"),
     page: int = Query(1, ge=1, description="Page number (1-indexed)"),
     page_size: int = Query(20, ge=1, le=100, description="Number of items per page"),
     db: AsyncSession = Depends(get_db),

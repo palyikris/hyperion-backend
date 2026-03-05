@@ -320,7 +320,7 @@ async def ai_worker_process(name: str):
                             "filename", "Unknown"
                         )
                         original_date = duplicate.created_at.strftime("%Y-%m-%d %H:%M")
-                        duplicate_reason = f"Image is a duplicate of image {f"{original_name[0:5]}..."} uploaded at {original_date}"
+                        duplicate_reason = f"Image is a duplicate of image {original_name[0:5]}... uploaded at {original_date}"
 
                         current_task.status = MediaStatus.FAILED
                         current_task.failed_reason = duplicate_reason
