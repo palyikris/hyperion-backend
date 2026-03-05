@@ -298,7 +298,11 @@ async def ai_worker_process(name: str):
                             Media.id != media_task_id,
                             Media.status != MediaStatus.FAILED,
                             Media.location.isnot(None),
-                            Media.created_at >= forty_eight_hours_ago,
+                            # Media.created_at >= forty_eight_hours_ago,
+                            Media.initial_metadata["filename"].astext
+                            == (current_task.initial_metadata or {}).get(
+                                "filename", ""
+                            ),
                             func.ST_DWithin(
                                 func.Geography(Media.location),
                                 func.Geography(current_location),
@@ -316,7 +320,7 @@ async def ai_worker_process(name: str):
                             "filename", "Unknown"
                         )
                         original_date = duplicate.created_at.strftime("%Y-%m-%d %H:%M")
-                        duplicate_reason = f"Image is a duplicate of image {original_name} uploaded at {original_date}"
+                        duplicate_reason = f"Image is a duplicate of image {original_name[0:5] + "..."} uploaded at {original_date}"
 
                         current_task.status = MediaStatus.FAILED
                         current_task.failed_reason = duplicate_reason
@@ -366,6 +370,37 @@ async def ai_worker_process(name: str):
                 fake_detections = []
                 if _is_image_media(task):
                     fake_detections = _generate_fake_detections(task.id)
+                else:
+                    await session.execute(
+                        update(Media)
+                        .where(Media.id == media_task_id)
+                        .values(
+                            status=MediaStatus.FAILED,
+                            failed_reason="Unsupported media type for AI processing",
+                        )
+                    )
+                    session.add(
+                        create_status_change_log(
+                            media_id=media_task_id,
+                            status=MediaStatus.FAILED,
+                            worker_name=name,
+                            detail="Unsupported media type for AI processing",
+                        )
+                    )
+                    await session.execute(
+                        update(AIWorkerState)
+                        .where(AIWorkerState.name == name)
+                        .values(status="Active")
+                    )
+                    await session.commit()
+
+                    await manager.send_status(
+                        user_id=str(uploader_id),
+                        media_id=str(media_task_id),
+                        status=MediaStatus.FAILED.value,
+                        worker=name,
+                        failed_reason="Unsupported media type for AI processing",
+                    )
 
                 if fake_detections:
                     session.add_all(fake_detections)
