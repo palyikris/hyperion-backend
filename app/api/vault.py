@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, Query, status, HTTPException
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc, asc
+from sqlalchemy import select, desc, asc, update
 from typing import Optional, List
 
 from app.database import get_db
@@ -122,6 +122,14 @@ async def delete_all_media(
         )
 
     deleted_count = 0
+    media_ids = [media.id for media in media_items]
+
+    await db.execute(
+        update(Media)
+        .where(Media.original_media_id.in_(media_ids))
+        .values(original_media_id=None)
+    )
+
     for media in media_items:
         # Delete from HF dataset if hf_path exists
         if media.hf_path:
@@ -162,6 +170,12 @@ async def delete_media(
     # Delete from HF dataset if hf_path exists
     if media.hf_path:
         await delete_from_hf(media.hf_path)
+
+    await db.execute(
+        update(Media)
+        .where(Media.original_media_id == media.id)
+        .values(original_media_id=None)
+    )
 
     await db.delete(media)
     await db.commit()
