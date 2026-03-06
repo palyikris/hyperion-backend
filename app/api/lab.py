@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 import uuid
 import json
@@ -11,9 +11,12 @@ from app.models.db.Media import Media
 from app.models.db.Detection import Detection
 from app.models.lab.MediaResponse import MediaResponse, MediaPatchRequest
 from app.api.medialog_utils.media_log_utils import create_status_change_log
+from app.api.upload_utils.metadata_extractor import get_address_from_coords
 
 
 router = APIRouter()
+
+ADDRESS_REFRESH_DISTANCE_METERS = 100
 
 
 @router.get(
@@ -134,6 +137,9 @@ async def patch_media(
             detail="Media not found",
         )
 
+    original_lat = media.lat
+    original_lng = media.lng
+
     if patch_data.lat is not None:
         media.lat = patch_data.lat
     if patch_data.lng is not None:
@@ -142,6 +148,43 @@ async def patch_media(
         media.altitude = patch_data.altitude
     if patch_data.address is not None:
         media.address = patch_data.address
+    else:
+        location_updated = patch_data.lat is not None or patch_data.lng is not None
+        new_lat = media.lat
+        new_lng = media.lng
+
+        if location_updated and new_lat is not None and new_lng is not None:
+            should_refresh_address = False
+
+            if original_lat is None or original_lng is None:
+                should_refresh_address = True
+            else:
+                distance_query = select(
+                    func.ST_Distance(
+                        func.Geography(
+                            func.ST_SetSRID(
+                                func.ST_MakePoint(original_lng, original_lat), 4326
+                            )
+                        ),
+                        func.Geography(
+                            func.ST_SetSRID(func.ST_MakePoint(new_lng, new_lat), 4326)
+                        ),
+                    )
+                )
+                distance_result = await db.execute(distance_query)
+                distance_m = distance_result.scalar_one_or_none() or 0
+                should_refresh_address = distance_m >= ADDRESS_REFRESH_DISTANCE_METERS
+
+            if should_refresh_address:
+                media.address = await get_address_from_coords(new_lat, new_lng)
+
+    # Keep PostGIS geometry in sync even when address is manually provided.
+    if (
+        (patch_data.lat is not None or patch_data.lng is not None)
+        and media.lat is not None
+        and media.lng is not None
+    ):
+        media.location = func.ST_SetSRID(func.ST_MakePoint(media.lng, media.lat), 4326)
 
     if patch_data.detections is not None:
         # build a set of new detection signatures (label + bbox) for matching
