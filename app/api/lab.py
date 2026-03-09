@@ -200,9 +200,18 @@ async def patch_media(
 
             if det_signature in new_detection_map:
                 new_det_data = new_detection_map[det_signature]
-                existing_det.confidence = 1.0  # human validation
-                if new_det_data.area_sqm is not None:
+                was_changed = False
+
+                if (
+                    new_det_data.area_sqm is not None
+                    and new_det_data.area_sqm != existing_det.area_sqm
+                ):
                     existing_det.area_sqm = new_det_data.area_sqm
+                    was_changed = True
+
+                if was_changed:
+                    existing_det.confidence = 1.0  # human validation
+
                 processed_signatures.add(det_signature)
             else:
                 media.detections.remove(existing_det)
