@@ -12,6 +12,8 @@ from datetime import datetime, timezone, date
 
 router = APIRouter()
 
+WORKER_ONLINE_THRESHOLD_SECONDS = 120
+
 from sqlalchemy import select
 from app.database import get_db  #
 from app.models.db.AIWorker import AIWorkerState
@@ -44,7 +46,9 @@ async def get_worker_status(
         else:
             if last_ping.tzinfo is None:
                 last_ping = last_ping.replace(tzinfo=timezone.utc)
-            is_online = (datetime.now(timezone.utc) - last_ping).total_seconds() < 120
+            is_online = (
+                datetime.now(timezone.utc) - last_ping
+            ).total_seconds() < WORKER_ONLINE_THRESHOLD_SECONDS
         status_label = worker.status if is_online else "Offline"
 
         if status_label in ["Active", "Working"]:

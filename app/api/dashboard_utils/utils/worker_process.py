@@ -12,13 +12,21 @@ from app.models.upload.MediaStatus import MediaStatus
 from app.api.upload_utils.conn_manager import worker_signal, manager
 from huggingface_hub import hf_hub_download
 import os
-from app.api.upload_utils.metadata_extractor import extract_media_metadata
+from app.api.upload_utils.metadata_extractor import (
+    extract_media_metadata,
+    get_address_from_coords,
+)
 import random
 from app.models.db.Detection import Detection
 
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff", ".heic"}
 FAKE_DETECTION_LABELS = ["plastic", "metal", "glass", "paper", "trash"]
+WORKER_IDLE_WAIT_SECONDS = 60
+WORKER_RATE_LIMIT_BACKOFF_SECONDS = 300
+WORKER_ERROR_RETRY_SECONDS = 10
+EXTRACTION_RETRY_DELAY_SECONDS = 5
+DUPLICATE_DISTANCE_METERS = 10
 
 
 def _is_image_media(media: Media) -> bool:
@@ -63,6 +71,43 @@ def _simulation_processing_delay_seconds() -> float:
     return round(random.uniform(1.5, 5.0), 2)
 
 
+async def _extract_metadata_from_hf(media_task: Media) -> dict:
+    hf_repo_id = os.getenv("HF_REPO_ID")
+    hf_token = os.getenv("HF_TOKEN")
+
+    if not hf_repo_id or not hf_token:
+        raise ValueError("HF_REPO_ID or HF_TOKEN environment variables are not set")
+
+    if not media_task.hf_path:
+        raise ValueError(f"Media task {media_task.id} is missing hf_path")
+
+    original_path = media_task.hf_path.replace("_thumbnail_", "_")
+    local_file_path = await asyncio.to_thread(
+        hf_hub_download,
+        repo_id=hf_repo_id,
+        filename=original_path,
+        repo_type="dataset",
+        token=hf_token,
+    )
+
+    try:
+        with open(local_file_path, "rb") as file_handle:
+            file_bytes = file_handle.read()
+
+        technical_meta = await asyncio.to_thread(extract_media_metadata, file_bytes)
+        gps_data = technical_meta.get("gps")
+        if isinstance(gps_data, dict):
+            lat = gps_data.get("lat")
+            lng = gps_data.get("lng")
+            if lat is not None and lng is not None:
+                gps_data["address"] = await get_address_from_coords(lat, lng)
+
+        return technical_meta
+    finally:
+        if local_file_path and os.path.exists(local_file_path):
+            os.remove(local_file_path)
+
+
 async def ai_worker_process(name: str):
     """
     Persistent background loop for a specific Titan worker.
@@ -84,7 +129,7 @@ async def ai_worker_process(name: str):
                         )
                     )
                     await session.commit()
-                await asyncio.sleep(300)
+                await asyncio.sleep(WORKER_RATE_LIMIT_BACKOFF_SECONDS)
                 continue
 
             async with AsyncSessionLocal() as session:
@@ -149,7 +194,9 @@ async def ai_worker_process(name: str):
             if not media_task_id:
                 async with worker_signal:
                     try:
-                        await asyncio.wait_for(worker_signal.wait(), timeout=60)
+                        await asyncio.wait_for(
+                            worker_signal.wait(), timeout=WORKER_IDLE_WAIT_SECONDS
+                        )
                     except asyncio.TimeoutError:
                         pass
                 continue
@@ -163,33 +210,11 @@ async def ai_worker_process(name: str):
             )
 
             extraction_ok = False
-            local_file_path = None
             try:
-                hf_repo_id = os.getenv("HF_REPO_ID")
-                hf_token = os.getenv("HF_TOKEN")
+                if not media_task:
+                    raise ValueError(f"Media task {media_task_id} was not loaded")
 
-                if not hf_repo_id or not hf_token:
-                    raise ValueError(
-                        "HF_REPO_ID or HF_TOKEN environment variables are not set"
-                    )
-
-                if not media_task or not media_task.hf_path:
-                    raise ValueError(f"Media task {media_task_id} is missing hf_path")
-
-                original_path = media_task.hf_path.replace("_thumbnail_", "_")
-
-                local_file_path = await asyncio.to_thread(
-                    hf_hub_download,
-                    repo_id=hf_repo_id,
-                    filename=original_path,
-                    repo_type="dataset",
-                    token=hf_token,
-                )
-
-                with open(local_file_path, "rb") as f:
-                    file_bytes = f.read()
-
-                technical_meta = await asyncio.to_thread(extract_media_metadata, file_bytes)
+                technical_meta = await _extract_metadata_from_hf(media_task)
 
                 async with AsyncSessionLocal() as session:
                     update_values = {
@@ -263,16 +288,13 @@ async def ai_worker_process(name: str):
                     worker=name,
                     failed_reason=extraction_failed_reason,
                 )
-            finally:
-                if local_file_path and os.path.exists(local_file_path):
-                    os.remove(local_file_path)
 
             if not extraction_ok:
-                await asyncio.sleep(5)
+                await asyncio.sleep(EXTRACTION_RETRY_DELAY_SECONDS)
                 continue
 
-            # Duplicate detection: Check for nearby items within ~10 meters (0.0001 degrees)
-            # uploaded in the last 48 hours with READY status
+            # Stage 2 duplicate guard: only runs after EXIF/GPS extraction so we can
+            # reject spatial duplicates that passed the filename-only upload check.
             duplicate_found = False
             async with AsyncSessionLocal() as session:
                 res = await session.execute(
@@ -306,7 +328,7 @@ async def ai_worker_process(name: str):
                             func.ST_DWithin(
                                 func.Geography(Media.location),
                                 func.Geography(current_location),
-                                10,  # 10 meters - using geography for accurate distance
+                                DUPLICATE_DISTANCE_METERS,
                             ),
                         )
                         .limit(1)
@@ -482,4 +504,4 @@ async def ai_worker_process(name: str):
                     )
                 except Exception as inner_e:
                     print(f"Worker {name} failed to update failure status: {inner_e}")
-            await asyncio.sleep(10)
+            await asyncio.sleep(WORKER_ERROR_RETRY_SECONDS)

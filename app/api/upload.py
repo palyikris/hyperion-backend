@@ -31,6 +31,8 @@ from sqlalchemy import select
 
 router = APIRouter()
 
+THUMBNAIL_SIZE = (400, 400)
+
 
 def _process_image_to_temp(
     content: bytes, media_id: uuid.UUID
@@ -44,7 +46,7 @@ def _process_image_to_temp(
     width, height = img.size
 
     thumbnail_img = img.copy()
-    thumbnail_img.thumbnail((400, 400))
+    thumbnail_img.thumbnail(THUMBNAIL_SIZE)
     if thumbnail_img.mode != "RGB":
         thumbnail_img = thumbnail_img.convert("RGB")
 

@@ -13,6 +13,8 @@ from app.models.dashboard.system_health import SystemHealthResponse
 router = APIRouter()
 
 START_TIME = time.time()
+# In-memory load history is process-local. Multi-worker deployments should use a
+# shared store if they need a fleet-wide dashboard view.
 # Initialize with zeros so the chart does not look broken on first load.
 load_history = deque([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], maxlen=7)
 _last_cpu_usage = None

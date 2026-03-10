@@ -9,6 +9,11 @@ from app.models.db.AIWorker import AIWorkerState
 from app.models.upload.MediaStatus import MediaStatus
 from app.api.upload_utils.conn_manager import worker_signal, manager
 
+REAPER_SLEEP_SECONDS = 600
+RATE_LIMIT_BACKOFF_SECONDS = 300
+STALE_UPLOADED_THRESHOLD_MINUTES = 10
+STALE_PENDING_THRESHOLD_MINUTES = 15
+
 
 async def _build_pending_timeout_detail(session, media_id):
     """Returns a tuple of (log_detail, user_friendly_reason) for pending timeouts."""
@@ -48,18 +53,19 @@ async def ai_reaper_process():
     Background overseer that recovers stuck tasks and notifies workers of missed signals.
     """
     while True:
-        # run every 10 minutes
-        await asyncio.sleep(600)
+        await asyncio.sleep(REAPER_SLEEP_SECONDS)
 
         if manager.is_hf_rate_limited():
-            await asyncio.sleep(300)
+            await asyncio.sleep(RATE_LIMIT_BACKOFF_SECONDS)
             continue
 
         async with AsyncSessionLocal() as session:
             try:
                 now = datetime.now(timezone.utc)
-                threshold = now - timedelta(minutes=10)
-                pending_threshold = now - timedelta(minutes=15)
+                threshold = now - timedelta(minutes=STALE_UPLOADED_THRESHOLD_MINUTES)
+                pending_threshold = now - timedelta(
+                    minutes=STALE_PENDING_THRESHOLD_MINUTES
+                )
                 changes_made = False
 
                 stale_uploaded = await session.execute(

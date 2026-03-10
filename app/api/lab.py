@@ -19,6 +19,43 @@ router = APIRouter()
 ADDRESS_REFRESH_DISTANCE_METERS = 100
 
 
+def _serialize_detection(detection: Detection) -> dict:
+    return {
+        "id": str(detection.id),
+        "label": detection.label,
+        "confidence": detection.confidence,
+        "bbox": detection.bbox,
+        "area_sqm": detection.area_sqm,
+    }
+
+
+def _serialize_media(media: Media) -> dict:
+    return {
+        "id": str(media.id),
+        "uploader_id": media.uploader_id,
+        "status": media.status.value,
+        "hf_path": media.hf_path,
+        "initial_metadata": media.initial_metadata,
+        "technical_metadata": media.technical_metadata,
+        "assigned_worker": media.assigned_worker,
+        "created_at": media.created_at,
+        "updated_at": media.updated_at,
+        "lat": media.lat,
+        "lng": media.lng,
+        "altitude": media.altitude,
+        "address": media.address,
+        "has_trash": media.has_trash,
+        "confidence": media.confidence,
+        "failed_reason": media.failed_reason,
+        "original_media_id": (
+            str(media.original_media_id) if media.original_media_id else None
+        ),
+        "detections": [
+            _serialize_detection(detection) for detection in media.detections
+        ],
+    }
+
+
 @router.get(
     "/{media_id}",
     status_code=status.HTTP_200_OK,
@@ -60,35 +97,7 @@ async def get_media(
             detail="Media not found",
         )
 
-    return {
-        "id": str(media.id),
-        "uploader_id": media.uploader_id,
-        "status": media.status.value,
-        "hf_path": media.hf_path,
-        "initial_metadata": media.initial_metadata,
-        "technical_metadata": media.technical_metadata,
-        "assigned_worker": media.assigned_worker,
-        "created_at": media.created_at,
-        "updated_at": media.updated_at,
-        "lat": media.lat,
-        "lng": media.lng,
-        "altitude": media.altitude,
-        "address": media.address,
-        "has_trash": media.has_trash,
-        "confidence": media.confidence,
-        "failed_reason": media.failed_reason,
-        "original_media_id": str(media.original_media_id) if media.original_media_id else None,
-        "detections": [
-            {
-                "id": str(d.id),
-                "label": d.label,
-                "confidence": d.confidence,
-                "bbox": d.bbox,
-                "area_sqm": d.area_sqm,
-            }
-            for d in media.detections
-        ],
-    }
+    return _serialize_media(media)
 
 
 @router.patch(
@@ -241,32 +250,4 @@ async def patch_media(
     db.add(validation_log)
     await db.commit()
 
-    return {
-        "id": str(media.id),
-        "uploader_id": media.uploader_id,
-        "status": media.status.value,
-        "hf_path": media.hf_path,
-        "initial_metadata": media.initial_metadata,
-        "technical_metadata": media.technical_metadata,
-        "assigned_worker": media.assigned_worker,
-        "created_at": media.created_at,
-        "updated_at": media.updated_at,
-        "lat": media.lat,
-        "lng": media.lng,
-        "altitude": media.altitude,
-        "address": media.address,
-        "has_trash": media.has_trash,
-        "confidence": media.confidence,
-        "failed_reason": media.failed_reason,
-        "original_media_id": str(media.original_media_id) if media.original_media_id else None,
-        "detections": [
-            {
-                "id": str(d.id),
-                "label": d.label,
-                "confidence": d.confidence,
-                "bbox": d.bbox,
-                "area_sqm": d.area_sqm,
-            }
-            for d in media.detections
-        ],
-    }
+    return _serialize_media(media)

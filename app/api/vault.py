@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, Query, status, HTTPException
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc, asc, update
+from sqlalchemy import select, desc, asc, update, func
 from typing import Optional, List
 
 from app.database import get_db
@@ -60,7 +60,11 @@ async def get_media_vault(
 
     offset = (page - 1) * page_size
 
-    count_query = select(Media).where(Media.uploader_id == current_user.id)
+    count_query = (
+        select(func.count())
+        .select_from(Media)
+        .where(Media.uploader_id == current_user.id)
+    )
     if status_filter:
         count_query = count_query.where(Media.status == status_filter)
     if search:
@@ -68,7 +72,7 @@ async def get_media_vault(
             Media.initial_metadata["filename"].as_string().ilike(f"%{search}%")
         )
     count_result = await db.execute(count_query)
-    total = len(count_result.scalars().all())
+    total = count_result.scalar_one()
 
     query = query.offset(offset).limit(page_size)
 

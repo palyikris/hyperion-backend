@@ -2,6 +2,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from contextlib import asynccontextmanager
+import asyncio
 from fastapi import FastAPI
 from app.api import auth
 from app.api import system
@@ -14,10 +16,43 @@ from app.api import lab
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.dashboard_utils.ux import track_ux_metrics
 from app.api.dashboard_utils.utils.init_workers import initialize_worker_fleet
+from app.api.auth import prune_expired_blacklisted_tokens
+from app.database import AsyncSessionLocal
 import os
 
 
+BLACKLIST_PRUNE_INTERVAL_SECONDS = 3600
+
+
+async def _blacklist_pruner() -> None:
+    while True:
+        await asyncio.sleep(BLACKLIST_PRUNE_INTERVAL_SECONDS)
+        async with AsyncSessionLocal() as session:
+            await prune_expired_blacklisted_tokens(session)
+            await session.commit()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await initialize_worker_fleet()
+
+    async with AsyncSessionLocal() as session:
+        await prune_expired_blacklisted_tokens(session)
+        await session.commit()
+
+    prune_task = asyncio.create_task(_blacklist_pruner())
+    try:
+        yield
+    finally:
+        prune_task.cancel()
+        try:
+            await prune_task
+        except asyncio.CancelledError:
+            pass
+
+
 app = FastAPI(
+    lifespan=lifespan,
     title="Hyperion AI Backend",
     description="""
     API for the Hyperion platform. 
@@ -46,11 +81,6 @@ app.add_middleware(
 @app.middleware("http")
 async def middleware(request, call_next):
     return await track_ux_metrics(request, call_next)
-
-
-@app.on_event("startup")
-async def on_startup():
-    await initialize_worker_fleet()
 
 
 # Public Routes

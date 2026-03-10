@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from app.database import get_db
 from app.core import security
 from app.models.db.User import User
@@ -18,8 +18,27 @@ from fastapi import Response
 from app.api.deps import get_current_user
 from datetime import datetime, timedelta, timezone
 from jose import jwt
+import logging
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+
+async def prune_expired_blacklisted_tokens(db: AsyncSession) -> None:
+    await db.execute(
+        delete(TokenBlacklist).where(
+            TokenBlacklist.expires_at < datetime.now(timezone.utc)
+        )
+    )
+
+
+def _serialize_me_response(user: User) -> dict:
+    return {
+        "id": str(user.id),
+        "email": user.email,
+        "full_name": user.full_name,
+        "language": user.language,
+    }
 
 
 @router.post(
@@ -77,8 +96,8 @@ async def login(user_data: UserModelForLogin, db: AsyncSession = Depends(get_db)
         key="access_token",
         value=token,
         httponly=True,
-        max_age=3600,  # 60 minutes
-        expires=3600,
+        max_age=security.get_access_token_expiry_seconds(),
+        expires=security.get_access_token_expiry_seconds(),
         samesite="none",  # CSRF protection
         secure=True,  # set to True in production (HTTPS)
         path="/",  # cookie is valid for the entire site
@@ -93,13 +112,7 @@ async def login(user_data: UserModelForLogin, db: AsyncSession = Depends(get_db)
 )
 async def read_users_me(current_user: User = Depends(get_current_user)):
     return JSONResponse(
-        content={
-            "id": current_user.id,
-            "email": current_user.email,
-            "full_name": current_user.full_name,
-            "language": current_user.language,
-        },
-        status_code=status.HTTP_200_OK,
+        content=_serialize_me_response(current_user), status_code=status.HTTP_200_OK
     )
 
 
@@ -113,6 +126,7 @@ async def logout(request: Request, db: AsyncSession = Depends(get_db)):
 
     if token:
         try:
+            await prune_expired_blacklisted_tokens(db)
             # Decode token to get expiration time
             payload = jwt.decode(
                 token, security.SECRET_KEY or "", algorithms=[security.ALGORITHM]
@@ -136,7 +150,7 @@ async def logout(request: Request, db: AsyncSession = Depends(get_db)):
             db.add(blacklisted_token)
             await db.commit()
         except Exception as e:
-            print(f"Error blacklisting token: {e}")
+            logger.warning("Error blacklisting token: %s", e)
             # Still proceed with logout even if blacklist fails
 
     response = JSONResponse(
@@ -165,11 +179,5 @@ async def update_user(
     await db.refresh(current_user)
 
     return JSONResponse(
-        content={
-            "id": current_user.id,
-            "email": current_user.email,
-            "full_name": current_user.full_name,
-            "language": current_user.language,
-        },
-        status_code=status.HTTP_200_OK,
+        content=_serialize_me_response(current_user), status_code=status.HTTP_200_OK
     )

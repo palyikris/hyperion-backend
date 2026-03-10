@@ -18,7 +18,8 @@ from typing import Optional
 
 router = APIRouter()
 
-# --- UX Global State ---
+# In-memory metrics are process-local. Multi-worker deployments should move this
+# state to shared storage such as Redis to avoid diverging dashboard numbers.
 active_users = {}
 response_times = deque(maxlen=50)
 active_trend_history = deque([0, 0, 0, 0, 0, 0, 0], maxlen=7)
@@ -26,6 +27,9 @@ daily_history = deque([0, 0, 0, 0, 0, 0, 0], maxlen=7)
 last_trend_update = 0  # Start at 0 so first update happens immediately
 daily_user_sessions = {}  # tracks unique users per day
 current_day = datetime.now(timezone.utc).date()
+
+ACTIVE_USER_TTL_SECONDS = 300
+TREND_UPDATE_INTERVAL_SECONDS = 60
 
 
 def update_metrics():
@@ -35,7 +39,7 @@ def update_metrics():
     today = datetime.now(timezone.utc).date()
 
     # Update active user trend every 60 seconds (more responsive for monitoring)
-    if current_time - last_trend_update > 60:
+    if current_time - last_trend_update > TREND_UPDATE_INTERVAL_SECONDS:
         active_trend_history.append(len(active_users))
         last_trend_update = current_time
 
@@ -54,7 +58,9 @@ def update_active_users(user_id: str):
     # cleanup users who havent made a request in 5 minutes
     current_time = time.time()
     expired = [
-        ip for ip, last_seen in active_users.items() if current_time - last_seen > 300
+        ip
+        for ip, last_seen in active_users.items()
+        if current_time - last_seen > ACTIVE_USER_TTL_SECONDS
     ]
     for ip in expired:
         del active_users[ip]

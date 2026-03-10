@@ -94,7 +94,7 @@ def extract_media_metadata(image_bytes: bytes):
                     "lat": lat,
                     "lng": lon,
                     "altitude": alt,
-                    "address": asyncio.run(get_address_from_coords(lat, lon)),
+                    "address": None,
                 }
             except (KeyError, TypeError, ZeroDivisionError):
                 pass

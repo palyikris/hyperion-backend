@@ -23,6 +23,8 @@ from app.models.map.MapResponse import MapLogsResponse, MapResponse, MapStatsRes
 router = APIRouter()
 
 STATS_CACHE_TTL_SECONDS = 60
+# In-memory cache is process-local. Multi-worker deployments should use shared
+# cache storage if they need consistent cache hits across workers.
 _map_stats_cache: dict[tuple, tuple[float, dict]] = {}
 
 

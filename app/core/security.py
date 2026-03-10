@@ -6,6 +6,7 @@ from jose import jwt
 # No more pwd_context!
 SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
 if not SECRET_KEY:
     raise ValueError("SECRET_KEY must be set in the environment")
@@ -30,6 +31,10 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 def create_access_token(data: dict):
     to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + timedelta(minutes=30)
+    expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY or "", algorithm=ALGORITHM or "")
+
+
+def get_access_token_expiry_seconds() -> int:
+    return ACCESS_TOKEN_EXPIRE_MINUTES * 60
