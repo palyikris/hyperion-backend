@@ -65,11 +65,7 @@ async def get_ai_fleet_efficiency(
 
     media_result = await db.execute(media_query)
     # Create lookup dict: worker_name -> row with successes/failures
-    media_rows = {
-        row.assigned_worker: row
-        for row in media_result.all()
-        if row.assigned_worker != "You"
-    }
+    media_rows = {row.assigned_worker: row for row in media_result.all()}
 
     # Query 2: Get tasks_processed_today from AIWorkerState table
     # This tracks the daily counter which resets at midnight
