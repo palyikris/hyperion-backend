@@ -21,7 +21,20 @@ from app.models.db.Detection import Detection
 
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff", ".heic"}
-FAKE_DETECTION_LABELS = ["plastic", "metal", "glass", "paper", "trash"]
+FAKE_DETECTION_LABELS = [
+    "Plastic bottles",
+    "Plastic bags",
+    "Aluminum cans",
+    "Glass",
+    "Paper/cardboard",
+    "Metal",
+    "Foam",
+    "Wood",
+    "Tires",
+    "Electronics",
+    "Textiles",
+    "Trash",
+]
 WORKER_IDLE_WAIT_SECONDS = 60
 WORKER_RATE_LIMIT_BACKOFF_SECONDS = 300
 WORKER_ERROR_RETRY_SECONDS = 10
