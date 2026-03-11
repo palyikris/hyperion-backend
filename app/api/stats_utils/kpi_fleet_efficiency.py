@@ -62,35 +62,39 @@ async def get_ai_fleet_efficiency(
         )
         .group_by(Media.assigned_worker)
     )
-    
+
     media_result = await db.execute(media_query)
     # Create lookup dict: worker_name -> row with successes/failures
-    media_rows = {row.assigned_worker: row for row in media_result.all()}
-    
+    media_rows = {
+        row.assigned_worker: row
+        for row in media_result.all()
+        if row.assigned_worker != "You"
+    }
+
     # Query 2: Get tasks_processed_today from AIWorkerState table
     # This tracks the daily counter which resets at midnight
     worker_query = select(AIWorkerState)
     worker_result = await db.execute(worker_query)
     worker_states = {w.name: w for w in worker_result.scalars().all()}
-    
+
     workers = []
     total_successes = 0
     total_failures = 0
-    
+
     # Iterate through all workers in TITAN_FLEET to ensure complete list
     # (even workers with no tasks for this user are included with zero counts)
     for worker_name in TITAN_FLEET:
         media_data = media_rows.get(worker_name)
         worker_state = worker_states.get(worker_name)
-        
+
         successes = media_data.successes if media_data else 0
         failures = media_data.failures if media_data else 0
         tasks_today = worker_state.tasks_processed_today if worker_state else 0
-        
+
         # Calculate reliability score: successes / total_tasks
         total_tasks = successes + failures
         reliability = successes / total_tasks if total_tasks > 0 else 1.0
-        
+
         workers.append(WorkerEfficiency(
             name=worker_name,
             success_count=successes,
@@ -98,14 +102,14 @@ async def get_ai_fleet_efficiency(
             tasks_processed_today=tasks_today,
             reliability_score=round(reliability, 4)
         ))
-        
+
         total_successes += successes
         total_failures += failures
-    
+
     # Calculate fleet-wide reliability score
     total_fleet_tasks = total_successes + total_failures
     fleet_reliability = total_successes / total_fleet_tasks if total_fleet_tasks > 0 else 1.0
-    
+
     return AIFleetEfficiency(
         workers=workers,
         fleet_reliability_score=round(fleet_reliability, 4),
