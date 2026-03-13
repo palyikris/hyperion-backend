@@ -20,6 +20,11 @@ class SignupResponse(BaseModel):
     message: str
 
 
+class LoginResponse(BaseModel):
+    message: str
+    user: dict
+
+
 class MessageResponse(BaseModel):
     message: str
 
