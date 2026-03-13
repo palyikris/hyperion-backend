@@ -306,7 +306,7 @@ async def ai_worker_process(name: str):
                 await asyncio.sleep(EXTRACTION_RETRY_DELAY_SECONDS)
                 continue
 
-            # Stage 2 duplicate guard: only runs after EXIF/GPS extraction so we can
+            # second duplicate guard: only runs after EXIF/GPS extraction so can
             # reject spatial duplicates that passed the filename-only upload check.
             duplicate_found = False
             async with AsyncSessionLocal() as session:
@@ -320,9 +320,6 @@ async def ai_worker_process(name: str):
                     and current_task.lat is not None
                     and current_task.lng is not None
                 ):
-                    forty_eight_hours_ago = datetime.now(timezone.utc) - timedelta(
-                        hours=48
-                    )
                     current_location = func.ST_SetSRID(
                         func.ST_MakePoint(current_task.lng, current_task.lat), 4326
                     )
@@ -343,6 +340,7 @@ async def ai_worker_process(name: str):
                                 func.Geography(current_location),
                                 DUPLICATE_DISTANCE_METERS,
                             ),
+                            Media.uploader_id == uploader_id,
                         )
                         .limit(1)
                     )

@@ -98,15 +98,14 @@ async def process_hf_upload(files_data: list[tuple], user_id: str):
         for m_id, filename, content_path, thumbnail_path in files_data:
             temp_files_to_cleanup.extend([content_path, thumbnail_path])
 
-            # Stage 1 duplicate guard: cheap filename match before HF upload so we
-            # can avoid unnecessary storage writes. The worker performs a second,
-            # stricter location-aware duplicate check after metadata extraction.
+            # first duplicate check for name
             duplicate_query = (
                 select(Media)
                 .where(
                     Media.id != m_id,
                     Media.status != MediaStatus.FAILED,
                     Media.initial_metadata["filename"].as_string() == filename,
+                    Media.uploader_id == user_id,
                 )
                 .limit(1)
             )
