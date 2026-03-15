@@ -338,10 +338,13 @@ async def video_complete(
     if not media:
         raise HTTPException(status_code=404, detail="Media not found")
     media.status = MediaStatus.UPLOADED
-    # Add thumbnail HF link to initial_metadata
+    # Add thumbnail HF link and local video path to initial_metadata
     if not media.initial_metadata:
         media.initial_metadata = {}
     media.initial_metadata["thumbnail_hf_url"] = thumb_hf_path
+    media.initial_metadata["local_video_path"] = (
+        video_path  # So the AI worker can find the file
+    )
     db.add(media)
 
     insert_log = create_status_change_log(
