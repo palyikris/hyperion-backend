@@ -37,13 +37,21 @@ from app.models.db.TokenBlacklist import (
 from app.models.db.User import (
     User,
 )
-from app.models.db.Media import Media
+from app.models.db.Media import Media, MediaType
 from app.models.upload.MediaStatus import MediaStatus
 from app.models.db.AIWorker import AIWorkerState
 from app.models.db.MediaLog import MediaLog
 from app.models.db.Detection import Detection
 
 target_metadata = Base.metadata
+
+
+# --- Ignore spatial_ref_sys table (PostGIS) in migrations ---
+def include_object(object, name, type_, reflected, compare_to):
+    if type_ == "table" and name == "spatial_ref_sys":
+        return False
+    return True
+
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:
@@ -69,6 +77,7 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        include_object=include_object,
     )
 
     with context.begin_transaction():
@@ -90,7 +99,9 @@ def run_migrations_online() -> None:
 
     with connectable.connect() as connection:
         context.configure(
-            connection=connection, target_metadata=target_metadata
+            connection=connection,
+            target_metadata=target_metadata,
+            include_object=include_object,
         )
 
         with context.begin_transaction():

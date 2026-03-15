@@ -8,6 +8,15 @@ import uuid
 from app.database import Base
 from app.models.upload.MediaStatus import MediaStatus
 
+# MediaType Enum for type field
+from enum import Enum as PyEnum
+
+
+class MediaType(PyEnum):
+    IMAGE = "image"
+    VIDEO = "video"
+
+
 class Media(Base):
     __tablename__ = "media"
     __table_args__ = (
@@ -23,6 +32,10 @@ class Media(Base):
         Enum(MediaStatus), default=MediaStatus.PENDING
     )
     hf_path: Mapped[str] = mapped_column(String, nullable=True)
+
+    media_type: Mapped[MediaType] = mapped_column(
+        Enum(MediaType), nullable=False, default=MediaType.IMAGE
+    )
 
     initial_metadata: Mapped[dict] = mapped_column(
         JSON, nullable=True

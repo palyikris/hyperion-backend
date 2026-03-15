@@ -20,6 +20,9 @@ from app.api.auth import prune_expired_blacklisted_tokens
 from app.database import AsyncSessionLocal
 import os
 
+# Video temp cleaner import
+from app.api.upload_utils.video_temp_cleaner import cleanup_old_video_temp_dirs
+
 
 BLACKLIST_PRUNE_INTERVAL_SECONDS = 3600
 
@@ -41,12 +44,25 @@ async def lifespan(app: FastAPI):
         await session.commit()
 
     prune_task = asyncio.create_task(_blacklist_pruner())
+
+    async def periodic_cleanup():
+        while True:
+            await asyncio.to_thread(cleanup_old_video_temp_dirs)
+            await asyncio.sleep(24 * 3600)  # 24 óra
+
+    video_cleanup_task = asyncio.create_task(periodic_cleanup())
+
     try:
         yield
     finally:
         prune_task.cancel()
+        video_cleanup_task.cancel()
         try:
             await prune_task
+        except asyncio.CancelledError:
+            pass
+        try:
+            await video_cleanup_task
         except asyncio.CancelledError:
             pass
 
