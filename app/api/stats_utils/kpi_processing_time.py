@@ -87,7 +87,10 @@ async def get_mean_time_to_process(
             ).label("avg_seconds"),
             func.count(worker_subquery.c.media_id).label("task_count"),
         )
-        .where(worker_subquery.c.worker_name.isnot(None))  # Exclude unassigned tasks
+        .where(
+            worker_subquery.c.worker_name.isnot(None),  # Exclude unassigned tasks
+            worker_subquery.c.worker_name != "You",  # Exclude 'You' worker
+        )
         .group_by(worker_subquery.c.worker_name)
     )
 

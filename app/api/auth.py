@@ -13,6 +13,7 @@ from app.models.auth.auth import (
     MessageResponse,
     MeResponse,
     PutMeUserModel,
+    LoginResponse,
 )
 from fastapi import Response
 from app.api.deps import get_current_user
@@ -70,7 +71,7 @@ async def signup(user_data: UserModel, db: AsyncSession = Depends(get_db)):
 
 @router.post(
     "/login",
-    response_model=MessageResponse,
+    response_model=LoginResponse,
     status_code=status.HTTP_200_OK,
 )
 # Depends(get_db) injects a database session into the route handler, allowing me to interact with the database asynchronously.
@@ -88,7 +89,15 @@ async def login(user_data: UserModelForLogin, db: AsyncSession = Depends(get_db)
     token = security.create_access_token(data={"sub": user.email})
 
     response = JSONResponse(
-        content={"message": "Login successful"},
+        content={
+            "message": "Login successful",
+            "user": {
+                "id": str(user.id),
+                "email": user.email,
+                "full_name": user.full_name,
+                "language": user.language,
+            },
+        },
         status_code=status.HTTP_200_OK,
     )
 
