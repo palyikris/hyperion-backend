@@ -42,6 +42,7 @@ from app.models.upload.MediaStatus import MediaStatus
 from app.models.db.AIWorker import AIWorkerState
 from app.models.db.MediaLog import MediaLog
 from app.models.db.Detection import Detection
+from app.models.db.VideoDetection import VideoDetection
 
 target_metadata = Base.metadata
 
