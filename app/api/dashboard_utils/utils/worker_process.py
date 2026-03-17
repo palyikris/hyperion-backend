@@ -171,6 +171,7 @@ async def ai_worker_process(name: str):
                     select(Media)
                     .where(Media.status == MediaStatus.UPLOADED)
                     .where(Media.assigned_worker == None)
+                    .where(Media.media_type == "image")
                     .order_by(Media.created_at.asc())
                     .limit(1)
                     .with_for_update(skip_locked=True)
