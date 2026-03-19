@@ -332,6 +332,8 @@ async def video_complete(
         media.initial_metadata = {}
     media.initial_metadata["thumbnail_hf_url"] = thumb_hf_path
     media.hf_path = thumb_hf_path
+    if not media.technical_metadata:
+        media.technical_metadata = {}
     media.technical_metadata["local_video_path"] = (
         video_path  # so the AI worker can find the file
     )

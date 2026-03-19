@@ -18,6 +18,7 @@ from app.api.upload_utils.metadata_extractor import (
 )
 import random
 from app.models.db.Detection import Detection
+from app.models.db.Media import MediaType
 
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff", ".heic"}
@@ -171,10 +172,12 @@ async def ai_worker_process(name: str):
                     select(Media)
                     .where(Media.status == MediaStatus.UPLOADED)
                     .where(Media.assigned_worker == None)
-                    .where(Media.media_type == "image")
+                    .where(Media.media_type == MediaType.IMAGE)
                     .order_by(Media.created_at.asc())
                     .limit(1)
-                    .with_for_update(skip_locked=True)
+                    .with_for_update(
+                        skip_locked=True
+                    )  # ensures two workers don't pick the same task
                 )
 
                 result = await session.execute(task_query)
