@@ -241,11 +241,6 @@ async def video_chunk(
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid media_id format")
     temp_dir = os.path.join(tempfile.gettempdir(), f"video_upload_{media_uuid}")
-    # Security: Only allow temp dirs in system temp, and check for path traversal
-    # NOTE: A path traversal attack is already impossible here, because media_id is strictly validated as a UUID above.
-    # This check is extra caution, but UUID validation alone is 100% protection.
-    if not os.path.abspath(temp_dir).startswith(os.path.abspath(tempfile.gettempdir())):
-        raise HTTPException(status_code=400, detail="Invalid temp dir path")
     if not os.path.isdir(temp_dir):
         raise HTTPException(status_code=404, detail="Temp dir for media_id not found")
     chunk_path = os.path.join(temp_dir, f"chunk_{chunk_index}")
@@ -277,12 +272,7 @@ async def video_complete(
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid media_id format")
     temp_dir = os.path.join(tempfile.gettempdir(), f"video_upload_{media_uuid}")
-    # Security: Only allow temp dirs in system temp, and check for path traversal
-    # NOTE: A path traversal attack is already impossible here, because media_id is strictly validated as a UUID above.
-    # This check is extra caution, but UUID validation alone is 100% protection.
-    if not os.path.abspath(temp_dir).startswith(os.path.abspath(tempfile.gettempdir())):
-        raise HTTPException(status_code=400, detail="Invalid temp dir path")
-    # Check all chunks exist before assembly
+
     missing_chunks = [
         i
         for i in range(total_chunks)
@@ -307,7 +297,6 @@ async def video_complete(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Thumbnail generation failed: {e}")
 
-    # Upload thumbnail to HF
     HF_TOKEN = os.getenv("HF_TOKEN")
     HF_REPO_ID = os.getenv("HF_REPO_ID")
     if not HF_REPO_ID or not HF_TOKEN:
@@ -342,11 +331,9 @@ async def video_complete(
     if not media.initial_metadata:
         media.initial_metadata = {}
     media.initial_metadata["thumbnail_hf_url"] = thumb_hf_path
-    media.hf_path = (
-        thumb_hf_path  # For backward compatibility, so it shows in recents and vault
-    )
-    media.initial_metadata["local_video_path"] = (
-        video_path  # So the AI worker can find the file
+    media.hf_path = thumb_hf_path
+    media.technical_metadata["local_video_path"] = (
+        video_path  # so the AI worker can find the file
     )
     db.add(media)
 
@@ -399,11 +386,8 @@ async def video_cancel(
     await db.commit()
 
     temp_dir = os.path.join(tempfile.gettempdir(), f"video_upload_{media_uuid}")
-    # Security: Only allow temp dirs in system temp, and check for path traversal
-    # NOTE: A path traversal attack is already impossible here, because media_id is strictly validated as a UUID above.
-    # This check is extra caution, but UUID validation alone is 100% protection.
-    if os.path.abspath(temp_dir).startswith(os.path.abspath(tempfile.gettempdir())):
-        shutil.rmtree(temp_dir, ignore_errors=True)
+    if os.path.isdir(temp_dir):
+        shutil.rmtree(temp_dir)
 
     await manager.send_status(
         user_id=str(current_user.id),
