@@ -12,12 +12,7 @@ from app.models.upload.MediaStatus import MediaStatus
 from app.api.upload_utils.conn_manager import worker_signal, manager
 from app.models.db.Detection import Detection
 from app.models.db.Media import MediaType
-from .media_utils import (
-    add_status_log,
-    fail_media,
-    build_metadata_update,
-    detect_duplicate,
-)
+
 from .image_processor import process_image_media
 from .video_processor import process_video_media
 from .hf_metadata import extract_metadata_from_hf

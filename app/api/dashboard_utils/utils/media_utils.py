@@ -146,3 +146,35 @@ def generate_fake_detections(media_id):
 
 def simulation_processing_delay_seconds() -> float:
     return round(random.uniform(1.5, 5.0), 2)
+
+
+import random
+
+
+def generate_fake_video_detections(
+    timestamp_sec: float, frame_lat: float, frame_lng: float
+) -> list[dict]:
+    """
+    Simulates finding trash on a video frame using REAL telemetry coordinates.
+    """
+    detections = []
+
+    # 15% chance to find trash in this specific frame
+    if random.random() < 0.15:
+        detections.append(
+            {
+                "label": random.choice(FAKE_DETECTION_LABELS),
+                "confidence": round(random.uniform(0.65, 0.98), 2),
+                "bbox": {
+                    "xmin": round(random.uniform(0.1, 0.7), 4),
+                    "ymin": round(random.uniform(0.1, 0.7), 4),
+                    "xmax": round(random.uniform(0.8, 0.95), 4),
+                    "ymax": round(random.uniform(0.8, 0.95), 4),
+                },
+                "lat": frame_lat,
+                "lng": frame_lng,
+                "timestamp_in_video": round(timestamp_sec, 2),
+            }
+        )
+
+    return detections
