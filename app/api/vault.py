@@ -10,6 +10,7 @@ from app.models.db.Media import Media
 from app.models.upload.MediaStatus import MediaStatus
 from app.models.vault.VaultResponse import VaultResponse
 from app.api.upload_utils.hf_upload import delete_from_hf
+from app.api.vault_utils.temp_file_finder import find_temp_video_file
 
 router = APIRouter()
 
@@ -160,6 +161,7 @@ async def delete_media(
 ):
     """
     Delete a media item from the user's vault, including the image from HF dataset.
+    If the media is a video, also check for its temp file.
     """
     query = select(Media).where(Media.id == id, Media.uploader_id == current_user.id)
     result = await db.execute(query)
@@ -171,7 +173,41 @@ async def delete_media(
             detail="Media not found or you don't have permission to delete it",
         )
 
-    # Delete from HF dataset if hf_path exists
+    temp_file_path = None
+    if (
+        hasattr(media, "media_type")
+        and getattr(media, "media_type", None)
+        and str(media.media_type).lower() == "video"
+    ):
+        local_video_path = None
+        if media.technical_metadata and isinstance(media.technical_metadata, dict):
+            local_video_path = media.technical_metadata.get("local_video_path")
+        if local_video_path:
+            import os
+
+            if os.path.exists(local_video_path):
+                temp_file_path = local_video_path
+        else:
+            filename = (
+                media.initial_metadata.get("filename")
+                if media.initial_metadata
+                else None
+            )
+            if filename:
+                temp_file_path = find_temp_video_file(filename)
+
+    # remove the temp file if found
+    if temp_file_path:
+        import os
+
+        try:
+            os.remove(temp_file_path)
+            temp_file_status = f"Temp video file deleted: {temp_file_path}"
+        except Exception as e:
+            temp_file_status = f"Temp video file found but could not be deleted: {temp_file_path} ({e})"
+    else:
+        temp_file_status = None
+
     if media.hf_path:
         await delete_from_hf(media.hf_path, media.id)
 
@@ -184,4 +220,7 @@ async def delete_media(
     await db.delete(media)
     await db.commit()
 
-    return JSONResponse(content={"detail": "Media deleted successfully"})
+    detail_msg = "Media deleted successfully"
+    if temp_file_status:
+        detail_msg += f"; {temp_file_status}"
+    return JSONResponse(content={"detail": detail_msg})
