@@ -246,6 +246,8 @@ async def process_video_media(
                         "FAILED",
                         failed_reason="Internal processing error.",
                     )
+            if hf_full_video_path:
+                await asyncio.to_thread(delete_video_from_hf, hf_full_video_path)
     finally:
         if hf_full_video_path:
             await asyncio.to_thread(delete_video_from_hf, hf_full_video_path)
