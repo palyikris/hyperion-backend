@@ -230,3 +230,47 @@ async def process_hf_upload(files_data: list[tuple], user_id: str):
                         os.remove(temp_file)
                 except Exception as cleanup_error:
                     print(f"Failed to cleanup temp file {temp_file}: {cleanup_error}")
+
+
+async def upload_video_frames_to_hf(
+    user_id: str, media_id: str, frames_data: list[tuple[str, str]]
+):
+    """
+    Batch uploads extracted video frames to Hugging Face as evidence.
+
+    frames_data: List of tuples containing (local_temp_path, target_hf_path)
+    e.g., [("/tmp/frame1.jpg", "media/user1/videos/m1/frame_2.0.jpg"), ...]
+    """
+    if not frames_data:
+        return True  # nothing to upload
+    api = HfApi(token=HF_TOKEN)
+    if not HF_REPO_ID:
+        print("Error: HF_REPO_ID environment variable is not set")
+        return False
+
+    operations = []
+
+    for local_path, hf_path in frames_data:
+        operations.append(
+            CommitOperationAdd(path_in_repo=hf_path, path_or_fileobj=local_path)
+        )
+
+    try:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None,
+            lambda: api.create_commit(
+                repo_id=HF_REPO_ID or "",
+                repo_type="dataset",
+                operations=operations,
+                commit_message=f"Auto-upload: {len(operations)} evidence frames for video {media_id}",
+            ),
+        )
+        print(
+            f"Successfully batch uploaded {len(operations)} frames for video {media_id}"
+        )
+        return True
+
+    except Exception as e:
+        print(f"Failed to batch upload video frames to HF for video {media_id}: {e}")
+        return False

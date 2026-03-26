@@ -135,9 +135,7 @@ async def ai_worker_process(name: str):
                     await asyncio.sleep(EXTRACTION_RETRY_DELAY_SECONDS)
                     continue
             elif media_task.media_type == MediaType.VIDEO:
-                await process_video_media(media_task, name, uploader_id)
-                # For now, just continue after placeholder
-                continue
+                await process_video_media(media_task)
             else:
                 # Unknown or unsupported media type
                 async with AsyncSessionLocal() as session:
