@@ -234,10 +234,15 @@ async def video_chunk(
     current_user=Depends(get_current_user),
 ):
 
+    try:
+        media_uuid = uuid.UUID(media_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid media_id format")
+
     user_id = current_user.id
 
     result = await db.execute(
-        select(Media).where(Media.id == media_id and Media.uploader_id == user_id)
+        select(Media).where(Media.id == media_uuid).where(Media.uploader_id == user_id)
     )
 
     if not result.scalar_one_or_none():
@@ -330,7 +335,11 @@ async def video_complete(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"HF upload failed: {e}")
 
-    result = await db.execute(select(Media).where(Media.id == media_uuid))
+    result = await db.execute(
+        select(Media)
+        .where(Media.id == media_uuid)
+        .where(Media.uploader_id == current_user.id)
+    )
     media = result.scalar_one_or_none()
     if not media:
         raise HTTPException(status_code=404, detail="Media not found")
