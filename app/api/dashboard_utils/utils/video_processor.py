@@ -218,6 +218,14 @@ async def process_video_media(
                 media.has_trash = False
                 media.confidence = 0.0
 
+            if (
+                media.technical_metadata
+                and "hf_full_video_path" in media.technical_metadata
+            ):
+                tech_meta = media.technical_metadata.copy()
+                tech_meta["hf_full_video_path"] = None
+                media.technical_metadata = tech_meta
+
             media.status = MediaStatus.READY
             session.add(create_status_change_log(media.id, MediaStatus.READY))
             await session.commit()
@@ -234,6 +242,15 @@ async def process_video_media(
                 if media:
                     media.status = MediaStatus.FAILED
                     media.failed_reason = "Internal processing error."
+
+                    if (
+                        media.technical_metadata
+                        and "hf_full_video_path" in media.technical_metadata
+                    ):
+                        tech_meta = media.technical_metadata.copy()
+                        tech_meta["hf_full_video_path"] = None
+                        media.technical_metadata = tech_meta
+
                     session.add(
                         create_status_change_log(
                             media.id, MediaStatus.FAILED, detail=str(e)

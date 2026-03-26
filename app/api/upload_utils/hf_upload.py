@@ -316,9 +316,11 @@ async def process_video_hf_upload(
             if media:
                 media.status = MediaStatus.UPLOADED
 
-                if not media.technical_metadata:
-                    media.technical_metadata = {}
-                media.technical_metadata["hf_full_video_path"] = video_hf_path
+                tech_meta = (
+                    media.technical_metadata.copy() if media.technical_metadata else {}
+                )
+                tech_meta["hf_full_video_path"] = video_hf_path
+                media.technical_metadata = tech_meta
 
                 insert_log = create_status_change_log(
                     media_id=uuid.UUID(media_id), status=MediaStatus.UPLOADED
