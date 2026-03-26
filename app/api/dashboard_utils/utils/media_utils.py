@@ -160,7 +160,7 @@ def generate_fake_video_detections(
     detections = []
 
     # 10% chance to find trash in this specific frame
-    if random.random() < 0.10:
+    if random.random() < 0.30:
         detections.append(
             {
                 "label": random.choice(FAKE_DETECTION_LABELS),
