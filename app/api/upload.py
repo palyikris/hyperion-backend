@@ -353,7 +353,6 @@ async def video_complete(
         user_id=current_user.id,
         local_video_path=video_path,
         video_hf_path=video_hf_path,
-        db=db,
     )
 
     return JSONResponse(

@@ -291,7 +291,6 @@ async def process_video_hf_upload(
     user_id: str,
     local_video_path: str,
     video_hf_path: str,
-    db: AsyncSession,
 ):
     """Background task to upload the full video to HF and notify the worker"""
     HF_TOKEN = os.getenv("HF_TOKEN")
@@ -310,28 +309,32 @@ async def process_video_hf_upload(
             ),
         )
 
-        result = await db.execute(select(Media).where(Media.id == media_id))
-        media = result.scalar_one_or_none()
+        async with AsyncSession() as session:
+            result = await session.execute(select(Media).where(Media.id == media_id))
+            media = result.scalar_one_or_none()
 
-        if media:
-            media.status = MediaStatus.UPLOADED
+            if media:
+                media.status = MediaStatus.UPLOADED
 
-            if not media.technical_metadata:
-                media.technical_metadata = {}
-            media.technical_metadata["hf_full_video_path"] = video_hf_path
+                if not media.technical_metadata:
+                    media.technical_metadata = {}
+                media.technical_metadata["hf_full_video_path"] = video_hf_path
 
-            insert_log = create_status_change_log(
-                media_id=uuid.UUID(media_id), status=MediaStatus.UPLOADED
-            )
-            db.add(insert_log)
-            await db.commit()
+                insert_log = create_status_change_log(
+                    media_id=uuid.UUID(media_id), status=MediaStatus.UPLOADED
+                )
+                session.add(insert_log)
+                await session.commit()
 
-            await manager.send_status(
-                user_id=str(user_id),
-                media_id=str(media_id),
-                status=MediaStatus.UPLOADED.value,
-                worker=None,
-            )
+                await manager.send_status(
+                    user_id=str(user_id),
+                    media_id=str(media_id),
+                    status=MediaStatus.UPLOADED.value,
+                    worker=None,
+                )
+
+                async with worker_signal:
+                    worker_signal.notify_all()
 
     except Exception as e:
         print(f"Failed to upload video to HF: {e}")

@@ -21,6 +21,7 @@ from app.api.upload_utils.telemetry import (
 from app.api.dashboard_utils.utils.media_utils import generate_fake_video_detections
 from app.api.upload_utils.conn_manager import manager
 from app.api.medialog_utils.media_log_utils import create_status_change_log
+from huggingface_hub import hf_hub_download
 
 import logging
 
@@ -37,13 +38,33 @@ async def process_video_media(
     """
     user_id = media_task.uploader_id
     media_id = media_task.id
-    local_video_path = media_task.technical_metadata.get("local_video_path")
-    hf_full_video_path = media_task.technical_metadata.get("hf_full_video_path")
+    hf_full_video_path = (
+        media_task.tech_metadata.get("hf_full_video_path")
+        if media_task.tech_metadata
+        else ""
+    )
+    local_video_path = None
+
+    HF_REPO_ID = os.getenv("HF_REPO_ID")
+    HF_TOKEN = os.getenv("HF_TOKEN")
 
     try:
-        user_id = media_task.uploader_id
-        media_id = media_task.id
-        local_video_path = media_task.technical_metadata.get("local_video_path")
+
+        def download_from_hf():
+            if HF_REPO_ID is None:
+                raise ValueError("HF_REPO_ID environment variable is not set.")
+            if not hf_full_video_path:
+                raise ValueError("hf_full_video_path is missing in tech_metadata.")
+            return hf_hub_download(
+                repo_id=HF_REPO_ID,
+                filename=hf_full_video_path,
+                repo_type="dataset",
+                token=HF_TOKEN,
+                local_dir=tempfile.gettempdir(),  # Saves to /tmp/media/user_id/...
+            )
+
+        logger.info(f"Worker downloading video from HF: {hf_full_video_path}")
+        local_video_path = await asyncio.to_thread(download_from_hf)
 
         date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
@@ -56,11 +77,10 @@ async def process_video_media(
                 logger.error(f"Media {media_id} not found.")
                 return
 
-            # extract Telemetry (SRT) in a background thread to avoid blocking
-            srt_path = f"{local_video_path}.srt"
+            srt_path = f"{hf_full_video_path}.srt"
             try:
                 await asyncio.to_thread(
-                    extract_srt_from_video, local_video_path, srt_path
+                    extract_srt_from_video, hf_full_video_path, srt_path
                 )
             except MissingTelemetryError as e:
                 media.status = MediaStatus.FAILED
@@ -86,7 +106,7 @@ async def process_video_media(
                 opened = cap.isOpened()
                 return cap if opened else None
 
-            cap = await asyncio.to_thread(open_video_capture, local_video_path)
+            cap = await asyncio.to_thread(open_video_capture, hf_full_video_path)
             if cap is None:
                 media.status = MediaStatus.FAILED
                 media.failed_reason = "Could not decode video file."
@@ -232,8 +252,12 @@ async def process_video_media(
             await asyncio.to_thread(delete_video_from_hf, hf_full_video_path)
 
         try:
-            if await asyncio.to_thread(os.path.exists, local_video_path):
-                await asyncio.to_thread(os.remove, local_video_path)
+            if await asyncio.to_thread(
+                os.path.exists, local_video_path if local_video_path else ""
+            ):
+                await asyncio.to_thread(
+                    os.remove, local_video_path if local_video_path else ""
+                )
         except Exception:
             pass
 
