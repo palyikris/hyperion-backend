@@ -154,6 +154,10 @@ async def process_video_media(
                     srt_path, timestamp_sec
                 )
 
+                logger.info(
+                    f"Frame {current_frame_idx} at {timestamp_sec}s: GPS matched as {frame_lat}, {frame_lng}"
+                )
+
                 if frame_lat is not None and frame_lng is not None:
 
                     detections = generate_fake_video_detections(
@@ -186,8 +190,8 @@ async def process_video_media(
                             timestamp_in_video=det["timestamp_in_video"],
                             label=det["label"],
                             confidence=det["confidence"],
-                            bounding_box=det["bbox"],
-                            image_url=hf_file_path,
+                            bbox=det["bbox"],
+                            frame_hf_path=hf_file_path,
                             lat=det["lat"],
                             lng=det["lng"],
                             location=f"SRID=4326;POINT({det['lng']} {det['lat']})",
