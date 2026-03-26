@@ -15,6 +15,7 @@ from app.models.db.Media import MediaType
 
 from .image_processor import process_image_media
 from .video_processor import process_video_media
+from app.api.upload_utils.hf_upload import delete_video_from_hf
 from .hf_metadata import extract_metadata_from_hf
 
 
@@ -135,7 +136,41 @@ async def ai_worker_process(name: str):
                     await asyncio.sleep(EXTRACTION_RETRY_DELAY_SECONDS)
                     continue
             elif media_task.media_type == MediaType.VIDEO:
-                await process_video_media(media_task)
+                try:
+                    await process_video_media(media_task)
+                except Exception as video_exc:
+                    # Attempt cleanup: delete from HF and local if possible
+                    hf_full_video_path = None
+                    local_video_path = None
+                    # Try to extract paths from media_task if available
+                    if (
+                        hasattr(media_task, "technical_metadata")
+                        and media_task.technical_metadata
+                    ):
+                        hf_full_video_path = media_task.technical_metadata.get(
+                            "hf_full_video_path"
+                        )
+                        local_video_path = media_task.technical_metadata.get(
+                            "local_video_path"
+                        )
+                    # Delete from Hugging Face
+                    if hf_full_video_path:
+                        await asyncio.to_thread(
+                            delete_video_from_hf, hf_full_video_path
+                        )
+                    # Delete local file
+                    if local_video_path:
+                        import os
+
+                        try:
+                            if await asyncio.to_thread(
+                                os.path.exists, local_video_path
+                            ):
+                                await asyncio.to_thread(os.remove, local_video_path)
+                        except Exception:
+                            pass
+                    # Re-raise to trigger the outer error handler
+                    raise
             else:
                 # Unknown or unsupported media type
                 async with AsyncSessionLocal() as session:

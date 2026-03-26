@@ -309,7 +309,7 @@ async def process_video_hf_upload(
             ),
         )
 
-        async with AsyncSession() as session:
+        async with AsyncSessionLocal() as session:
             result = await session.execute(select(Media).where(Media.id == media_id))
             media = result.scalar_one_or_none()
 
