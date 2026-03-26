@@ -35,4 +35,4 @@ class VideoDetection(Base):
     )
 
     # Relationships
-    video_session = relationship("Media", back_populates="video_detections")
+    media = relationship("Media", back_populates="video_detections")

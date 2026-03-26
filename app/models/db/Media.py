@@ -77,3 +77,6 @@ class Media(Base):
     detections = relationship(
         "Detection", backref="media", cascade="all, delete-orphan", lazy="selectin"
     )
+    video_detections = relationship(
+        "VideoDetection", back_populates="media", cascade="all, delete-orphan"
+    )

@@ -274,3 +274,85 @@ async def upload_video_frames_to_hf(
     except Exception as e:
         print(f"Failed to batch upload video frames to HF for video {media_id}: {e}")
         return False
+
+import os
+import asyncio
+from huggingface_hub import HfApi
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from app.models.db.Media import Media
+from app.models.upload.MediaStatus import MediaStatus
+from app.api.upload_utils.conn_manager import manager
+from app.api.medialog_utils.media_log_utils import create_status_change_log
+
+
+async def process_video_hf_upload(
+    media_id: str,
+    user_id: str,
+    local_video_path: str,
+    video_hf_path: str,
+    db: AsyncSession,
+):
+    """Background task to upload the full video to HF and notify the worker"""
+    HF_TOKEN = os.getenv("HF_TOKEN")
+    HF_REPO_ID = os.getenv("HF_REPO_ID")
+    api = HfApi(token=HF_TOKEN)
+
+    try:
+        await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: api.upload_file(
+                path_or_fileobj=local_video_path,
+                path_in_repo=video_hf_path,
+                repo_id=HF_REPO_ID or "",
+                repo_type="dataset",
+                commit_message=f"Upload full video for AI processing: {media_id}",
+            ),
+        )
+
+        result = await db.execute(select(Media).where(Media.id == media_id))
+        media = result.scalar_one_or_none()
+
+        if media:
+            media.status = MediaStatus.UPLOADED
+
+            if not media.technical_metadata:
+                media.technical_metadata = {}
+            media.technical_metadata["hf_full_video_path"] = video_hf_path
+
+            insert_log = create_status_change_log(
+                media_id=uuid.UUID(media_id), status=MediaStatus.UPLOADED
+            )
+            db.add(insert_log)
+            await db.commit()
+
+            await manager.send_status(
+                user_id=str(user_id),
+                media_id=str(media_id),
+                status=MediaStatus.UPLOADED.value,
+                worker=None,
+            )
+
+    except Exception as e:
+        print(f"Failed to upload video to HF: {e}")
+    finally:
+        if os.path.exists(local_video_path):
+            os.remove(local_video_path)
+
+
+def delete_video_from_hf(video_hf_path: str):
+    """Deletes a video file from the Hugging Face dataset."""
+    HF_TOKEN = os.getenv("HF_TOKEN")
+    HF_REPO_ID = os.getenv("HF_REPO_ID")
+    api = HfApi(token=HF_TOKEN)
+
+    try:
+        api.delete_file(
+            path_in_repo=video_hf_path,
+            repo_id=HF_REPO_ID or "",
+            repo_type="dataset",
+            commit_message=f"Cleanup: deleted {video_hf_path}",
+        )
+        print(f"Successfully deleted {video_hf_path} from Hugging Face.")
+    except Exception as e:
+        print(f"Error deleting file from Hugging Face: {e}")

@@ -25,7 +25,7 @@ import os
 from fastapi.responses import JSONResponse
 from fastapi import HTTPException, status
 from app.models.upload.UploadResponse import UploadResponse, RecentsResponse
-from app.api.upload_utils.hf_upload import process_hf_upload
+from app.api.upload_utils.hf_upload import process_hf_upload, process_video_hf_upload
 from sqlalchemy import select
 from app.api.upload_utils.video_file_helpers import (
     save_video_chunk_to_temp,
@@ -193,11 +193,6 @@ async def video_init(
 ):
     media_id = uuid.uuid4()  # Use UUID type throughout
     temp_dir = os.path.join(tempfile.gettempdir(), f"video_upload_{media_id}")
-    # Security: Only allow temp dirs in system temp, and check for path traversal
-    # NOTE: A path traversal attack is already impossible here, because media_id is strictly validated as a UUID above.
-    # This check is extra caution, but UUID validation alone is 100% protection.
-    if not os.path.abspath(temp_dir).startswith(os.path.abspath(tempfile.gettempdir())):
-        raise HTTPException(status_code=400, detail="Invalid temp dir path")
     os.makedirs(temp_dir, exist_ok=True)
 
     new_media = Media(
@@ -235,7 +230,19 @@ async def video_chunk(
     media_id: str,
     chunk_index: int = Form(...),
     chunk: UploadFile = File(...),
+    db=Depends(get_db),
+    current_user=Depends(get_current_user),
 ):
+
+    user_id = current_user.id
+
+    result = await db.execute(
+        select(Media).where(Media.id == media_id and Media.uploader_id == user_id)
+    )
+
+    if not result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Media not found or access denied")
+
     try:
         media_uuid = uuid.UUID(media_id)
     except Exception:
@@ -264,6 +271,7 @@ async def video_chunk(
 async def video_complete(
     media_id: str,
     total_chunks: int = Form(...),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
@@ -326,32 +334,26 @@ async def video_complete(
     media = result.scalar_one_or_none()
     if not media:
         raise HTTPException(status_code=404, detail="Media not found")
-    media.status = MediaStatus.UPLOADED
-    # Add thumbnail HF link and local video path to initial_metadata
     if not media.initial_metadata:
         media.initial_metadata = {}
     media.initial_metadata["thumbnail_hf_url"] = thumb_hf_path
     media.hf_path = thumb_hf_path
     if not media.technical_metadata:
         media.technical_metadata = {}
-    media.technical_metadata["local_video_path"] = (
-        video_path  # so the AI worker can find the file
-    )
+    media.technical_metadata["local_video_path"] = video_path
+    media.status = MediaStatus.PENDING
     db.add(media)
-
-    insert_log = create_status_change_log(
-        media_id=media_uuid,
-        status=MediaStatus.UPLOADED,
-    )
-    db.add(insert_log)
     await db.commit()
 
-    await manager.send_status(
-        user_id=str(current_user.id),
-        media_id=str(media_uuid),
-        status=MediaStatus.UPLOADED.value,
-        worker=None,
-        img_url=thumb_hf_path,
+    video_hf_path = f"media/{current_user.id}/{date_str}/{media_uuid}_full_video.mp4"
+
+    background_tasks.add_task(
+        process_video_hf_upload,
+        media_id=media_id,
+        user_id=current_user.id,
+        local_video_path=video_path,
+        video_hf_path=video_hf_path,
+        db=db,
     )
 
     return JSONResponse(
