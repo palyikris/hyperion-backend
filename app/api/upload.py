@@ -248,10 +248,6 @@ async def video_chunk(
     if not result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Media not found or access denied")
 
-    try:
-        media_uuid = uuid.UUID(media_id)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid media_id format")
     temp_dir = os.path.join(tempfile.gettempdir(), f"video_upload_{media_uuid}")
     if not os.path.isdir(temp_dir):
         raise HTTPException(status_code=404, detail="Temp dir for media_id not found")
