@@ -20,12 +20,12 @@ from app.models.db.VideoDetection import VideoDetection
 from app.models.db.MediaLog import MediaLog
 from app.models.db.Detection import Detection
 from app.models.map.MapResponse import MapLogsResponse, MapResponse, MapStatsResponse
+from collections import defaultdict
+
 
 router = APIRouter()
 
 STATS_CACHE_TTL_SECONDS = 60
-# In-memory cache is process-local. Multi-worker deployments should use shared
-# cache storage if they need consistent cache hits across workers.
 _map_stats_cache: dict[tuple, tuple[float, dict]] = {}
 
 
@@ -86,6 +86,31 @@ async def get_map_data(
             return media.lat, media.lng
         return None, None
 
+    grouped_video_detections = defaultdict(list)
+    for v in video_records:
+        grouped_video_detections[str(v.media_id)].append(
+            {
+                "id": str(v.id),
+                "media_id": str(v.media_id),
+                "filename": v.media.initial_metadata.get("filename"),
+                "status": v.media.status.value,
+                "worker_name": v.media.assigned_worker,
+                "lat": extract_coords(v)[0],
+                "lng": extract_coords(v)[1],
+                "altitude": v.altitude,
+                "address": v.address,
+                "image_url": v.frame_hf_path,
+                "confidence": v.confidence,
+                "label": v.label,
+                "bbox": v.bbox,
+                "timestamp_in_video": v.timestamp_in_video,
+            }
+        )
+    for detections in grouped_video_detections.values():
+        detections.sort(
+            key=lambda x: x["timestamp_in_video"] if "timestamp_in_video" in x else 0
+        )
+
     return JSONResponse(
         content={
             "total": len(image_records),
@@ -115,29 +140,7 @@ async def get_map_data(
                 }
                 for m in image_records
             ],
-            "video_detections": [
-                {
-                    "id": str(v.id),
-                    "media_id": str(v.media_id),
-                    "filename": v.media.initial_metadata.get("filename"),
-                    "status": v.media.status.value,
-                    "worker_name": v.media.assigned_worker,
-                    "lat": extract_coords(v)[0],
-                    "lng": extract_coords(v)[1],
-                    "altitude": v.altitude,
-                    "address": v.address,
-                    "image_url": v.frame_hf_path,
-                    "confidence": v.confidence,
-                    "label": v.label,
-                    "bbox": v.bbox,
-                    "timestamp_in_video": v.timestamp_in_video,
-                }
-                for v in video_records
-            ].sort(
-                key=lambda x: (
-                    x["timestamp_in_video"] if "timestamp_in_video" in x else 0
-                )
-            ),
+            "video_detections": grouped_video_detections,
         }
     )
 
