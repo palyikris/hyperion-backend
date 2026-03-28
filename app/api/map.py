@@ -115,7 +115,7 @@ async def get_map_data(
 
     return JSONResponse(
         content={
-            "total": len(image_records),
+            "total": len(image_records) + len(video_records),
             "items": [
                 {
                     "id": str(m.id),
