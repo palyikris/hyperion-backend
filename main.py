@@ -37,7 +37,7 @@ async def _blacklist_pruner() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await initialize_worker_fleet()
+    asyncio.create_task(initialize_worker_fleet())
 
     async with AsyncSessionLocal() as session:
         await prune_expired_blacklisted_tokens(session)
