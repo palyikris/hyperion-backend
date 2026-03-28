@@ -55,12 +55,14 @@ async def get_map_data(
 
     video_query = (
         select(VideoDetection)
+        .join(Media, VideoDetection.media_id == Media.id)
         .options(selectinload(VideoDetection.media))
         .where(
-            VideoDetection.media.uploader_id == current_user.id,
+            Media.uploader_id == current_user.id,
             VideoDetection.location.isnot(None),
         )
     )
+
     if all(v is not None for v in [min_lat, max_lat, min_lng, max_lng]):
         # Use ST_Intersects with ST_MakeEnvelope for spatial bounding box query
         bbox = ST_MakeEnvelope(min_lng, min_lat, max_lng, max_lat, 4326)
