@@ -16,6 +16,7 @@ from time import monotonic
 from app.database import get_db
 from app.api.deps import get_current_user
 from app.models.db.Media import Media
+from app.models.db.VideoDetection import VideoDetection
 from app.models.db.MediaLog import MediaLog
 from app.models.db.Detection import Detection
 from app.models.map.MapResponse import MapLogsResponse, MapResponse, MapStatsResponse
@@ -43,7 +44,7 @@ async def get_map_data(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    query = (
+    image_query = (
         select(Media)
         .options(selectinload(Media.detections))
         .where(
@@ -52,19 +53,32 @@ async def get_map_data(
         )
     )
 
+    video_query = (
+        select(VideoDetection)
+        .options(selectinload(VideoDetection.media))
+        .where(
+            VideoDetection.media.uploader_id == current_user.id,
+            VideoDetection.location.isnot(None),
+        )
+    )
     if all(v is not None for v in [min_lat, max_lat, min_lng, max_lng]):
         # Use ST_Intersects with ST_MakeEnvelope for spatial bounding box query
         bbox = ST_MakeEnvelope(min_lng, min_lat, max_lng, max_lat, 4326)
-        query = query.where(ST_Intersects(Media.location, bbox))
+        image_query = image_query.where(ST_Intersects(Media.location, bbox))
+        video_query = video_query.where(ST_Intersects(VideoDetection.location, bbox))
 
     if has_trash is not None:
-        query = query.where(Media.has_trash == has_trash)
+        image_query = image_query.where(Media.has_trash == has_trash)
 
     if min_confidence is not None and min_confidence > 0:
-        query = query.where(Media.confidence >= min_confidence)
+        image_query = image_query.where(Media.confidence >= min_confidence)
+        video_query = video_query.where(VideoDetection.confidence >= min_confidence)
 
-    result = await db.execute(query)
-    records = result.scalars().all()
+    image_result = await db.execute(image_query)
+    image_records = image_result.scalars().all()
+
+    video_result = await db.execute(video_query)
+    video_records = video_result.scalars().all()
 
     def extract_coords(media):
         """Extract lat/lng from location geometry or fall back to legacy columns."""
@@ -74,7 +88,7 @@ async def get_map_data(
 
     return JSONResponse(
         content={
-            "total": len(records),
+            "total": len(image_records),
             "items": [
                 {
                     "id": str(m.id),
@@ -99,8 +113,31 @@ async def get_map_data(
                     ],
                     "failed_reason": m.failed_reason,
                 }
-                for m in records
+                for m in image_records
             ],
+            "video_detections": [
+                {
+                    "id": str(v.id),
+                    "media_id": str(v.media_id),
+                    "filename": v.media.initial_metadata.get("filename"),
+                    "status": v.media.status.value,
+                    "worker_name": v.media.assigned_worker,
+                    "lat": extract_coords(v)[0],
+                    "lng": extract_coords(v)[1],
+                    "altitude": v.altitude,
+                    "address": v.address,
+                    "image_url": v.frame_hf_path,
+                    "confidence": v.confidence,
+                    "label": v.label,
+                    "bbox": v.bbox,
+                    "timestamp_in_video": v.timestamp_in_video,
+                }
+                for v in video_records
+            ].sort(
+                key=lambda x: (
+                    x["timestamp_in_video"] if "timestamp_in_video" in x else 0
+                )
+            ),
         }
     )
 

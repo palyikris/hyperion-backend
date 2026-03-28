@@ -22,6 +22,7 @@ from app.api.dashboard_utils.utils.media_utils import generate_fake_video_detect
 from app.api.upload_utils.conn_manager import manager
 from app.api.medialog_utils.media_log_utils import create_status_change_log
 from huggingface_hub import hf_hub_download
+from app.api.upload_utils.metadata_extractor import get_address_from_coords
 
 import logging
 
@@ -185,6 +186,8 @@ async def process_video_media(
 
                         frames_to_upload.append((tmp_img_path, hf_file_path))
 
+                        address = await get_address_from_coords(det["lat"], det["lng"])
+
                         db_det = VideoDetection(
                             media_id=media.id,
                             timestamp_in_video=det["timestamp_in_video"],
@@ -195,6 +198,7 @@ async def process_video_media(
                             lat=det["lat"],
                             lng=det["lng"],
                             location=f"SRID=4326;POINT({det['lng']} {det['lat']})",
+                            address=address,
                         )
                         all_detections_for_db.append(db_det)
 

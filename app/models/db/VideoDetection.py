@@ -18,10 +18,12 @@ class VideoDetection(Base):
 
     lat: Mapped[float] = mapped_column(Float, nullable=False)
     lng: Mapped[float] = mapped_column(Float, nullable=False)
+    altitude: Mapped[float] = mapped_column(Float, nullable=False, default=0)
     location: Mapped[WKBElement] = mapped_column(
         Geometry(geometry_type="POINT", srid=4326), nullable=False
     )
 
+    address: Mapped[str] = mapped_column(String, nullable=True)
     label: Mapped[str] = mapped_column(String, nullable=False)
     confidence: Mapped[float] = mapped_column(Float, nullable=False)
     bbox: Mapped[dict] = mapped_column(JSON, nullable=False)  # {"x", "y", "w", "h"}
