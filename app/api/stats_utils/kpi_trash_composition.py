@@ -11,6 +11,7 @@ from sqlalchemy import select, func
 
 from app.models.db.Media import Media
 from app.models.db.Detection import Detection
+from app.models.db.VideoDetection import VideoDetection
 from app.models.stats import TrashCompositionItem
 
 
@@ -33,26 +34,44 @@ async def get_trash_composition(
         [{"label": "plastic", "count": 150, "percentage": 45.5},
          {"label": "metal", "count": 100, "percentage": 30.3}, ...]
     """
-    query = (
+    # Query Detection counts
+    detection_query = (
         select(Detection.label, func.count(Detection.id).label("count"))
-        .join(Media, Detection.media_id == Media.id)  # Link detections to media
-        .where(Media.uploader_id == user_id)           # User-scoped filter
-        .group_by(Detection.label)                     # Aggregate by trash type
-        .order_by(func.count(Detection.id).desc())     # Most common first
+        .join(Media, Detection.media_id == Media.id)
+        .where(Media.uploader_id == user_id)
+        .group_by(Detection.label)
     )
-    
-    result = await db.execute(query)
-    rows = result.all()
-    
-    # Calculate total for percentage computation
-    total = sum(int(row[1]) for row in rows)
-    
-    # Build response with percentage calculated from total
+    detection_result = await db.execute(detection_query)
+    detection_rows = detection_result.all()
+
+    # Query VideoDetection counts
+    video_query = (
+        select(VideoDetection.label, func.count(VideoDetection.id).label("count"))
+        .join(Media, VideoDetection.media_id == Media.id)
+        .where(Media.uploader_id == user_id)
+        .group_by(VideoDetection.label)
+    )
+    video_result = await db.execute(video_query)
+    video_rows = video_result.all()
+
+    # Combine counts per label
+    from collections import defaultdict
+
+    label_counts = defaultdict(int)
+    for row in detection_rows:
+        label_counts[str(row[0])] += int(row[1])
+    for row in video_rows:
+        label_counts[str(row[0])] += int(row[1])
+
+    # Sort by count descending
+    sorted_items = sorted(label_counts.items(), key=lambda x: x[1], reverse=True)
+    total = sum(count for _, count in sorted_items)
+
     return [
         TrashCompositionItem(
-            label=str(row[0]),
-            count=int(row[1]),
-            percentage=round((int(row[1]) / total * 100) if total > 0 else 0, 2)
+            label=label,
+            count=count,
+            percentage=round((count / total * 100) if total > 0 else 0, 2),
         )
-        for row in rows
+        for label, count in sorted_items
     ]

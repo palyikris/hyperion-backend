@@ -9,6 +9,7 @@ from sqlalchemy import select, func, desc
 from app.models.stats import FunFact
 from app.models.db.Media import Media
 from app.models.db.Detection import Detection
+from app.models.db.VideoDetection import VideoDetection
 from app.models.upload.MediaStatus import MediaStatus
 
 
@@ -118,12 +119,21 @@ async def get_fun_facts(
         )
 
     # --- FACT 2: Area Conversion (1 smartphone screen ~ 0.007 m²) ---
-    area_q = (
-        select(func.sum(Detection.area_sqm))
+    area_detection_q = (
+        select(func.coalesce(func.sum(Detection.area_sqm), 0))
         .join(Media)
         .where(Media.uploader_id == user_id)
     )
-    total_area = (await db.execute(area_q)).scalar() or 0
+    area_video_detection_q = (
+        select(func.coalesce(func.sum(VideoDetection.area_sqm), 0))
+        .join(Media)
+        .where(Media.uploader_id == user_id)
+    )
+    total_area_detection = (await db.execute(area_detection_q)).scalar() or 0
+    total_area_video_detection = (
+        await db.execute(area_video_detection_q)
+    ).scalar() or 0
+    total_area = total_area_detection + total_area_video_detection
     if total_area > 0:
         screens = int(total_area / 0.007)
         if screens > 0:
@@ -136,21 +146,40 @@ async def get_fun_facts(
             )
 
     # --- FACT 3: Dominant Label (Trash Specialist) ---
-    label_q = (
+    # Get label counts from Detection
+    label_detection_q = (
         select(Detection.label, func.count(Detection.id))
         .join(Media)
         .where(Media.uploader_id == user_id)
         .group_by(Detection.label)
-        .order_by(desc(func.count(Detection.id)))
-        .limit(1)
     )
-    label_res = (await db.execute(label_q)).first()
-    if label_res:
+    detection_labels = (await db.execute(label_detection_q)).all()
+
+    # Get label counts from VideoDetection
+    label_video_detection_q = (
+        select(VideoDetection.label, func.count(VideoDetection.id))
+        .join(Media)
+        .where(Media.uploader_id == user_id)
+        .group_by(VideoDetection.label)
+    )
+    video_detection_labels = (await db.execute(label_video_detection_q)).all()
+
+    # Combine label counts
+    from collections import Counter
+
+    label_counter = Counter()
+    for label, count in detection_labels:
+        label_counter[label] += count
+    for label, count in video_detection_labels:
+        label_counter[label] += count
+
+    if label_counter:
+        dominant_label, _ = label_counter.most_common(1)[0]
         results.append(
             FunFact(
                 title=FUN_FACT_TEMPLATES["specialist"][l]["title"],
                 fact=FUN_FACT_TEMPLATES["specialist"][l]["text"].format(
-                    label=label_res[0]
+                    label=dominant_label
                 ),
                 icon="target",
             )
