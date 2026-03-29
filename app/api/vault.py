@@ -7,6 +7,7 @@ from typing import Optional, List
 from app.database import get_db
 from app.api.deps import get_current_user
 from app.models.db.Media import Media
+from app.models.db.VideoDetection import VideoDetection
 from app.models.upload.MediaStatus import MediaStatus
 from app.models.vault.VaultResponse import VaultResponse
 from app.api.upload_utils.hf_upload import delete_from_hf
@@ -166,6 +167,9 @@ async def delete_media(
     query = select(Media).where(Media.id == id, Media.uploader_id == current_user.id)
     result = await db.execute(query)
     media = result.scalar_one_or_none()
+    video_detections_query = select(VideoDetection).where(VideoDetection.media_id == id)
+    video_detections_result = await db.execute(video_detections_query)
+    video_detections = video_detections_result.scalars().all()
 
     if not media:
         raise HTTPException(
@@ -207,6 +211,10 @@ async def delete_media(
             temp_file_status = f"Temp video file found but could not be deleted: {temp_file_path} ({e})"
     else:
         temp_file_status = None
+
+    if video_detections:
+        for detection in video_detections:
+            await delete_from_hf(detection.frame_hf_path, detection.id)
 
     if media.hf_path:
         await delete_from_hf(media.hf_path, media.id)
