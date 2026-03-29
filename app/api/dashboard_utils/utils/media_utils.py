@@ -174,6 +174,8 @@ def generate_fake_video_detections(
                 "lat": frame_lat,
                 "lng": frame_lng,
                 "timestamp_in_video": round(timestamp_sec, 2),
+                "is_manual": False,
+                "area_sqm": round(random.uniform(0.1, 4.0), 3),
             }
         )
 

@@ -1,5 +1,5 @@
 import uuid
-from sqlalchemy import String, ForeignKey, JSON, Float, DateTime, Index
+from sqlalchemy import String, ForeignKey, JSON, Float, DateTime, Index, Boolean
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from geoalchemy2 import Geometry, WKBElement
 from datetime import datetime, timezone
@@ -35,6 +35,9 @@ class VideoDetection(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc)
     )
+
+    is_manual: Mapped[bool] = mapped_column(Boolean, default=False)
+    area_sqm: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     # Relationships
     media = relationship("Media", back_populates="video_detections")
