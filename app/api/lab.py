@@ -244,7 +244,7 @@ async def patch_media(
     validation_log = create_status_change_log(
         media_id=media.id,
         status=media.status,
-        detail="Detections and location validated",
+        detail="Detections or location validated by You",
         worker_name="You",
     )
     db.add(validation_log)
