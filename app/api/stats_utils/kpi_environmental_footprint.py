@@ -11,6 +11,7 @@ from sqlalchemy import select, func
 
 from app.models.db.Media import Media
 from app.models.db.Detection import Detection
+from app.models.db.VideoDetection import VideoDetection
 from app.models.upload.MediaStatus import MediaStatus
 from app.models.stats import EnvironmentalFootprint
 
@@ -34,23 +35,39 @@ async def get_environmental_footprint(
     Returns:
         EnvironmentalFootprint with total_area_sqm and total_detections
     """
-    query = (
+    # Query for Detection
+    detection_query = (
         select(
-            # COALESCE ensures we get 0 instead of NULL if no detections exist
             func.coalesce(func.sum(Detection.area_sqm), 0).label("total_area"),
-            func.count(Detection.id).label("total_detections")
+            func.count(Detection.id).label("total_detections"),
         )
         .join(Media, Detection.media_id == Media.id)
-        .where(
-            Media.uploader_id == user_id,
-            Media.status == MediaStatus.READY  # Only fully processed media
-        )
+        .where(Media.uploader_id == user_id, Media.status == MediaStatus.READY)
     )
-    
-    result = await db.execute(query)
-    row = result.one()
-    
+
+    # Query for VideoDetection
+    video_detection_query = (
+        select(
+            func.coalesce(func.sum(VideoDetection.area_sqm), 0).label("total_area"),
+            func.count(VideoDetection.id).label("total_detections"),
+        )
+        .join(Media, VideoDetection.media_id == Media.id)
+        .where(Media.uploader_id == user_id, Media.status == MediaStatus.READY)
+    )
+
+    detection_result = await db.execute(detection_query)
+    detection_row = detection_result.one()
+
+    video_detection_result = await db.execute(video_detection_query)
+    video_detection_row = video_detection_result.one()
+
+    total_area = float(detection_row.total_area or 0) + float(
+        video_detection_row.total_area or 0
+    )
+    total_detections = (detection_row.total_detections or 0) + (
+        video_detection_row.total_detections or 0
+    )
+
     return EnvironmentalFootprint(
-        total_area_sqm=float(row.total_area or 0),
-        total_detections=row.total_detections
+        total_area_sqm=total_area, total_detections=total_detections
     )

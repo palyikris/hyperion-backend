@@ -20,6 +20,7 @@ from sqlalchemy.orm import selectinload
 
 from app.models.db.Media import Media
 from app.models.db.Detection import Detection
+from app.models.db.VideoDetection import VideoDetection
 from app.models.upload.MediaStatus import MediaStatus
 
 
@@ -103,7 +104,7 @@ async def generate_manifest_data(
     result = await db.execute(query)
     media_list = result.scalars().all()
 
-    # Flatten: one row per detection
+    # Flatten: one row per detection (image or video)
     rows = []
     for media in media_list:
         # Extract technical metadata once per media
@@ -111,11 +112,11 @@ async def generate_manifest_data(
 
         filename = media.initial_metadata.get("filename", "N/A") if media.initial_metadata else "N/A"
 
-        # Build image URL
+        # Build image URL for images
         image_url = _build_hf_url(media.hf_path, media.uploader_id, str(media.id))
 
-        # Create one row for each detection
-        for detection in media.detections:
+        # Create one row for each image detection
+        for detection in getattr(media, "detections", []):
             row = {
                 # Core Identification
                 "Media ID": str(media.id),
@@ -143,6 +144,48 @@ async def generate_manifest_data(
                     media.assigned_worker if media.assigned_worker else "N/A"
                 ),
                 "Image URL": image_url,
+                "Upload Date": (
+                    media.created_at.strftime("%Y-%m-%d %H:%M:%S UTC")
+                    if media.created_at
+                    else "N/A"
+                ),
+                # Editable Fields (unlocked in protected worksheet)
+                "Field Notes": "",
+                "Cleanup Status": "Pending",
+            }
+            rows.append(row)
+
+        # Create one row for each video detection (if any)
+        for vdet in getattr(media, "video_detections", []):
+            # For video detections, use frame image URL
+            frame_url = _build_hf_url(
+                vdet.frame_hf_path, media.uploader_id, str(media.id)
+            )
+            row = {
+                # Core Identification
+                "Media ID": str(media.id),
+                "Detection ID": str(vdet.id),
+                "Filename": filename,
+                # Geospatial Data (from video detection)
+                "Latitude": vdet.lat if vdet.lat is not None else "N/A",
+                "Longitude": vdet.lng if vdet.lng is not None else "N/A",
+                "Drone Altitude (m)": (
+                    vdet.altitude if vdet.altitude is not None else "N/A"
+                ),
+                "Address": vdet.address if vdet.address else "N/A",
+                # AI Insights
+                "Object Label": vdet.label,
+                "Confidence (%)": round(vdet.confidence * 100, 2),
+                "Area (sqm)": (vdet.area_sqm if vdet.area_sqm is not None else "N/A"),
+                # Forensics (EXIF Data)
+                "Camera Make": make,
+                "Camera Model": model,
+                "Date Taken": date_taken,
+                # Audit & Verification
+                "Assigned Titan": (
+                    media.assigned_worker if media.assigned_worker else "N/A"
+                ),
+                "Image URL": frame_url,
                 "Upload Date": (
                     media.created_at.strftime("%Y-%m-%d %H:%M:%S UTC")
                     if media.created_at
