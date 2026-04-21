@@ -15,6 +15,7 @@ from app.database import AsyncSessionLocal
 from sqlalchemy import update, select
 from .hf_metadata import extract_metadata_from_hf
 import asyncio
+from app.api.ai_client import get_real_detections
 
 DUPLICATE_DISTANCE_METERS = 10
 
@@ -110,9 +111,9 @@ async def process_image_media(media_task, name, uploader_id):
         res = await session.execute(select(Media).where(Media.id == media_task_id))
         task = res.scalar_one()
 
-        fake_detections = []
+        detections = []
         if is_image_media(task):
-            fake_detections = generate_fake_detections(task.id)
+            detections = await get_real_detections(task.hf_path)
         else:
             await fail_media(
                 session,
@@ -124,16 +125,16 @@ async def process_image_media(media_task, name, uploader_id):
             )
             return False
 
-        if fake_detections:
-            session.add_all(fake_detections)
+        if detections:
+            session.add_all(detections)
 
             task_meta = task.technical_metadata or {}
-            max_confidence = max(d.confidence for d in fake_detections)
+            max_confidence = max(d.confidence for d in detections)
             task.has_trash = True
             task.confidence = round(max_confidence * 100, 2)
             task_meta["has_trash"] = True
             task_meta["confidence"] = task.confidence
-            task_meta["detections_count"] = len(fake_detections)
+            task_meta["detections_count"] = len(detections)
             task.technical_metadata = task_meta
         else:
             task_meta = task.technical_metadata or {}

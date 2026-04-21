@@ -23,6 +23,8 @@ from app.api.upload_utils.conn_manager import manager
 from app.api.medialog_utils.media_log_utils import create_status_change_log
 from huggingface_hub import hf_hub_download
 from app.api.upload_utils.metadata_extractor import get_address_from_coords
+from app.api.ai_client import get_real_detections
+
 
 import logging
 
@@ -161,9 +163,7 @@ async def process_video_media(
 
                 if frame_lat is not None and frame_lng is not None:
 
-                    detections = generate_fake_video_detections(
-                        timestamp_sec, frame_lat, frame_lng
-                    )
+                    detections = await get_real_detections(frame)
 
                     for det in detections:
 
