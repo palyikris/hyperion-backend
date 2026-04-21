@@ -115,6 +115,7 @@ async def process_image_media(media_task, name, uploader_id):
         detections = []
         if is_image_media(task):
             detections = await get_real_detections(task.hf_path)
+            print(f"Detections for media {media_task_id}: {detections}")
         else:
             await fail_media(
                 session,
@@ -127,21 +128,32 @@ async def process_image_media(media_task, name, uploader_id):
             return False
 
         if detections:
-            for det in detections:
-                det["media_id"] = media_task_id
-                x1, y1, x2, y2 = det["bbox"]
+            orig_w = task.initial_metadata.get("width")
+            orig_h = task.initial_metadata.get("height")
 
-                new_det = Detection(
-                    media_id=media_task_id,
-                    label=det["label"],
-                    confidence=det["confidence"],
-                    bbox={"x": x1, "y": y1, "w": x2 - x1, "h": y2 - y1},
+            detection_instances = []
+            for d in detections:
+                x1, y1, x2, y2 = d["bbox"]
+
+                norm_x = x1 / orig_w
+                norm_y = y1 / orig_h
+                norm_w = (x2 - x1) / orig_w
+                norm_h = (y2 - y1) / orig_h
+
+                detection_instances.append(
+                    Detection(
+                        media_id=media_task_id,
+                        label="Trash" if d["label"] == "rubbish" else d["label"],
+                        confidence=d["confidence"],
+                        bbox={"x": norm_x, "y": norm_y, "w": norm_w, "h": norm_h},
+                    )
                 )
 
-                session.add(new_det)
+            session.add_all(detection_instances)
 
             task_meta = task.technical_metadata or {}
-            max_confidence = max(d.confidence for d in detections)
+            max_confidence = max(d["confidence"] for d in detections)
+
             task.has_trash = True
             task.confidence = round(max_confidence * 100, 2)
             task_meta["has_trash"] = True
