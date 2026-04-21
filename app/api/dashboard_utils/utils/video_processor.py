@@ -146,9 +146,18 @@ async def process_video_media(
                     ret, frame = cap.read()
                     return ret, frame
 
+                def save_temp_frame(f):
+                    with tempfile.NamedTemporaryFile(
+                        suffix=".jpg", delete=False
+                    ) as tmp:
+                        cv2.imwrite(tmp.name, f)
+                        return tmp.name
+
                 ret, frame = await asyncio.to_thread(read_frame, cap, current_frame_idx)
                 if not ret:
                     break
+
+                tmp_frame_path = await asyncio.to_thread(save_temp_frame, frame)
 
                 timestamp_sec = current_frame_idx / fps
 
@@ -162,7 +171,10 @@ async def process_video_media(
 
                 if frame_lat is not None and frame_lng is not None:
 
-                    detections = await get_real_detections(frame)
+                    detections = await get_real_detections(tmp_frame_path)
+
+                    if os.path.exists(tmp_frame_path):
+                        os.remove(tmp_frame_path)
 
                     for det in detections:
 
@@ -186,6 +198,8 @@ async def process_video_media(
                         frames_to_upload.append((tmp_img_path, hf_file_path))
 
                         address = await get_address_from_coords(det["lat"], det["lng"])
+                        vid_w = cap.get(cv2.CAP_PROP_FRAME_WIDTH)
+                        vid_h = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
                         x1, y1, x2, y2 = det["bbox"]
 
                         db_det = VideoDetection(
@@ -194,14 +208,14 @@ async def process_video_media(
                             label=det["label"],
                             confidence=det["confidence"],
                             bbox={
-                                "x": x1,
-                                "y": y1,
-                                "w": x2 - x1,
-                                "h": y2 - y1,
+                                "x": x1 / vid_w,
+                                "y": y1 / vid_h,
+                                "w": (x2 - x1) / vid_w,
+                                "h": (y2 - y1) / vid_h,
                             },
                             frame_hf_path=hf_file_path,
-                            lat=det["lat"],
-                            lng=det["lng"],
+                            lat=frame_lat,
+                            lng=frame_lng,
                             location=f"SRID=4326;POINT({det['lng']} {det['lat']})",
                             address=address,
                         )
@@ -276,8 +290,6 @@ async def process_video_media(
                         "FAILED",
                         failed_reason="Internal processing error.",
                     )
-            if hf_full_video_path:
-                await asyncio.to_thread(delete_video_from_hf, hf_full_video_path)
     finally:
         if hf_full_video_path:
             await asyncio.to_thread(delete_video_from_hf, hf_full_video_path)
