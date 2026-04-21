@@ -9,6 +9,7 @@ from app.api.dashboard_utils.utils.media_utils import (
 )
 from app.api.upload_utils.conn_manager import manager
 from app.models.db.Media import Media
+from app.models.db.Detection import Detection
 from app.models.upload.MediaStatus import MediaStatus
 from app.models.db.AIWorker import AIWorkerState
 from app.database import AsyncSessionLocal
@@ -126,7 +127,18 @@ async def process_image_media(media_task, name, uploader_id):
             return False
 
         if detections:
-            session.add_all(detections)
+            for det in detections:
+                det["media_id"] = media_task_id
+                x1, y1, x2, y2 = det["bbox"]
+
+                new_det = Detection(
+                    media_id=media_task_id,
+                    label=det["label"],
+                    confidence=det["confidence"],
+                    bbox={"x": x1, "y": y1, "w": x2 - x1, "h": y2 - y1},
+                )
+
+                session.add(new_det)
 
             task_meta = task.technical_metadata or {}
             max_confidence = max(d.confidence for d in detections)

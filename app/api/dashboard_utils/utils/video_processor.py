@@ -18,7 +18,6 @@ from app.api.upload_utils.telemetry import (
     get_location_at_timestamp,
     MissingTelemetryError,
 )
-from app.api.dashboard_utils.utils.media_utils import generate_fake_video_detections
 from app.api.upload_utils.conn_manager import manager
 from app.api.medialog_utils.media_log_utils import create_status_change_log
 from huggingface_hub import hf_hub_download
@@ -187,13 +186,19 @@ async def process_video_media(
                         frames_to_upload.append((tmp_img_path, hf_file_path))
 
                         address = await get_address_from_coords(det["lat"], det["lng"])
+                        x1, y1, x2, y2 = det["bbox"]
 
                         db_det = VideoDetection(
                             media_id=media.id,
                             timestamp_in_video=det["timestamp_in_video"],
                             label=det["label"],
                             confidence=det["confidence"],
-                            bbox=det["bbox"],
+                            bbox={
+                                "x": x1,
+                                "y": y1,
+                                "w": x2 - x1,
+                                "h": y2 - y1,
+                            },
                             frame_hf_path=hf_file_path,
                             lat=det["lat"],
                             lng=det["lng"],

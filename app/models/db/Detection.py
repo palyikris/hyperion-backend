@@ -12,7 +12,7 @@ class Detection(Base):
         ForeignKey("media.id", ondelete="CASCADE"), nullable=False
     )
 
-    label: Mapped[str] = mapped_column(String, nullable=False)  # pl: "plastic", "metal"
+    label: Mapped[str] = mapped_column(String, nullable=False)
     confidence: Mapped[float] = mapped_column(Float, nullable=False)  # 0.0 - 1.0
     bbox: Mapped[dict] = mapped_column(
         JSON, nullable=False

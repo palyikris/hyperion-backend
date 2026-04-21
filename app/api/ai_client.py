@@ -1,9 +1,12 @@
 import httpx
 import asyncio
 import os
+import logging
 
 HF_API_URL = "https://palyikris-hyperion-model.hf.space/detect"
 
+
+logger = logging.getLogger(__name__)
 
 async def get_real_detections(image_path):
     """
@@ -17,13 +20,16 @@ async def get_real_detections(image_path):
 
         file_bytes = await asyncio.to_thread(read_file)
 
-        async with httpx.AsyncClient(timeout=30) as client:
+        logger.info(f"Sending image {image_path} to AI Worker for detection")
+
+        async with httpx.AsyncClient(timeout=60) as client:
             response = await client.post(
                 HF_API_URL,
                 files={"file": (os.path.basename(image_path), file_bytes)},
             )
 
         if response.status_code == 200:
+            logger.info(f"Received detections from AI Worker for image {image_path}")
             return response.json().get("detections", [])
         else:
             print(f"AI API Error: {response.status_code}")
