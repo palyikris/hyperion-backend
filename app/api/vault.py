@@ -39,13 +39,33 @@ async def get_media_vault(
     Retrieves the user's personal media library with advanced search and filtering.
     """
     query = select(Media).where(Media.uploader_id == current_user.id)
+    video_query = select(VideoDetection).where(
+        VideoDetection.media_id.in_(
+            select(Media.id).where(Media.uploader_id == current_user.id)
+        )
+    )
 
     if status_filter:
         query = query.where(Media.status == status_filter)
+        video_query = video_query.where(
+            VideoDetection.media_id.in_(
+                select(Media.id).where(
+                    Media.uploader_id == current_user.id, Media.status == status_filter
+                )
+            )
+        )
 
     if search:
         query = query.where(
             Media.initial_metadata["filename"].as_string().ilike(f"%{search}%")
+        )
+        video_query = video_query.where(
+            VideoDetection.media_id.in_(
+                select(Media.id).where(
+                    Media.uploader_id == current_user.id,
+                    Media.initial_metadata["filename"].as_string().ilike(f"%{search}%"),
+                )
+            )
         )
 
     column_map = {
@@ -57,8 +77,10 @@ async def get_media_vault(
     sort_column = column_map.get(order_by, Media.created_at)
     if direction == "desc":
         query = query.order_by(desc(sort_column))
+        video_query = video_query.order_by(desc(VideoDetection.created_at))
     else:
         query = query.order_by(asc(sort_column))
+        video_query = video_query.order_by(asc(VideoDetection.created_at))
 
     offset = (page - 1) * page_size
 
@@ -67,44 +89,101 @@ async def get_media_vault(
         .select_from(Media)
         .where(Media.uploader_id == current_user.id)
     )
+    count_video_query = (
+        select(func.count())
+        .select_from(VideoDetection)
+        .where(
+            VideoDetection.media_id.in_(
+                select(Media.id).where(Media.uploader_id == current_user.id)
+            )
+        )
+    )
+
     if status_filter:
         count_query = count_query.where(Media.status == status_filter)
+        count_video_query = count_video_query.where(
+            VideoDetection.media_id.in_(
+                select(Media.id).where(
+                    Media.uploader_id == current_user.id, Media.status == status_filter
+                )
+            )
+        )
     if search:
         count_query = count_query.where(
             Media.initial_metadata["filename"].as_string().ilike(f"%{search}%")
         )
+        count_video_query = count_video_query.where(
+            VideoDetection.media_id.in_(
+                select(Media.id).where(
+                    Media.uploader_id == current_user.id,
+                    Media.initial_metadata["filename"].as_string().ilike(f"%{search}%"),
+                )
+            )
+        )
+
     count_result = await db.execute(count_query)
+    count_video_result = await db.execute(count_video_query)
     total = count_result.scalar_one()
+    total_video_detections = count_video_result.scalar_one()
 
     query = query.offset(offset).limit(page_size)
+    video_query = video_query.offset(offset).limit(page_size)
 
     result = await db.execute(query)
+    video_result = await db.execute(video_query)
+
     records = result.scalars().all()
+    video_detections = video_result.scalars().all()
 
     return JSONResponse(
         content={
-            "total": total,
+            "total": total + total_video_detections,
             "page": page,
             "page_size": page_size,
-            "total_pages": (total + page_size - 1) // page_size,
-            "items": [
+            "total_pages": (total + total_video_detections + page_size - 1)
+            // page_size,
+            "image_items": [
                 {
                     "id": str(media.id),
-                    "filename": media.initial_metadata.get("filename"),
-                    "status": media.status.value,
-                    "timestamp": media.created_at.isoformat(),
-                    "metadata": media.initial_metadata,
-                    "assigned_worker": media.assigned_worker,
-                    "image_url": media.hf_path,
+                    "uploader_id": str(media.uploader_id),
+                    "status": (
+                        media.status.value
+                        if hasattr(media.status, "value")
+                        else media.status
+                    ),
+                    "hf_path": media.hf_path,
+                    "initial_metadata": media.initial_metadata,
                     "technical_metadata": media.technical_metadata,
+                    "assigned_worker": media.assigned_worker,
+                    "created_at": media.created_at.isoformat(),
                     "updated_at": media.updated_at.isoformat(),
                     "lat": media.lat,
                     "lng": media.lng,
                     "altitude": media.altitude,
                     "address": media.address,
+                    "has_trash": media.has_trash,
+                    "confidence": media.confidence,
                     "failed_reason": media.failed_reason,
                 }
                 for media in records
+            ],
+            "video_items": [
+                {
+                    "id": str(video_det.id),
+                    "media_id": str(video_det.media_id),
+                    "lat": video_det.lat,
+                    "lng": video_det.lng,
+                    "altitude": video_det.altitude,
+                    "address": video_det.address,
+                    "label": video_det.label,
+                    "confidence": video_det.confidence,
+                    "bbox": video_det.bbox,
+                    "timestamp_in_video": video_det.timestamp_in_video,
+                    "frame_hf_path": video_det.frame_hf_path,
+                    "created_at": video_det.created_at.isoformat(),
+                    "area_sqm": video_det.area_sqm,
+                }
+                for video_det in video_detections
             ],
         }
     )
