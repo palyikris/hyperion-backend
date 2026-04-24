@@ -94,7 +94,10 @@ async def generate_manifest_data(
     # Query media with eager-loaded detections
     query = (
         select(Media)
-        .options(selectinload(Media.detections))  # Eager load detections
+        .options(
+            selectinload(Media.detections),
+            selectinload(Media.video_detections)
+        )  # Eager load detections
         .where(Media.uploader_id == user_id)       # Security: User-scoped
         .where(Media.status == MediaStatus.READY)  # Only successfully processed
         .where(Media.created_at >= cutoff_date)    # Time filter
