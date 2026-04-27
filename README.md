@@ -9,249 +9,81 @@ pinned: false
 
 # Hyperion Backend API
 
-FastAPI backend for the Hyperion platform, providing user authentication, dashboard monitoring, and AI worker fleet management. Built with async SQLAlchemy, Postgres, and JWT-based authentication via HttpOnly cookies.
+FastAPI backend for the Hyperion platform, providing user authentication, dashboard monitoring, AI worker fleet management, and advanced geospatial analytics. Built with async SQLAlchemy, PostGIS, and AI-driven object detection capabilities.
 
-## Features
+## Key Features
 
-### Authentication
-- Email/password signup and login with bcrypt password hashing
-- JWT access tokens with HttpOnly cookies (30-minute expiration, 60-minute cookie)
-- Token blacklist support for secure logout (revocation stored in database)
-- User profile read/update (`/me`) with full_name and language fields
-- Token validation via JWT decode with expiration checks
+### Authentication & User Management
+- **Secure Auth**: Email/password signup and login with bcrypt hashing.
+- **Stateful Security**: JWT access tokens via HttpOnly cookies with a token blacklist for secure logout.
+- **User Profiles**: Manage personal information including full name and preferred language.
 
-### System Monitoring
-- Health check endpoint with database latency reporting and 503 error on DB failure
-- Real-time system health metrics (CPU, memory) with container awareness
-- Container-aware resource monitoring (reads cgroup v1/v2 files when available; falls back to psutil)
-- Uptime tracking as percentage of 24-hour window
-- 7-day load history tracking (combined CPU/memory pressure)
-- System status classification (STABILIZED < ACTIVE < HEAVY_LOAD < STRESSED)
-- Request-level tracking middleware measuring response times across all routes
-- Session-based active user tracking with 5-minute timeout and daily unique user counting
+### Lab & AI Validation (Human-in-the-loop)
+- **Manual Override**: A dedicated interface to manually validate, correct, or delete AI-detected objects.
+- **Intelligent Detection Merging**: The system intelligently compares new manual validations with existing AI results, updating confidence scores to `1.0` (validated) only where changes occur.
+- **Dynamic Location Updates**: Supports updating media coordinates and altitude. If a location is moved by more than 100 meters, the system automatically triggers a reverse geocoding update to refresh the postal address.
+- **Audit Logging**: Every manual intervention is automatically logged in the system as a "You" (user-validated) action in the media's history.
 
-### Dashboard
-- **AI Worker Fleet**: Manage and monitor 10 AI workers (Helios, Eos, Aethon, Crius, Iapetus, Perses, Phlegon, Phoebe, Theia, Cronus)
-  - Real-time worker status and task tracking with current task status display
-  - Task queue management and dispatch
-  - Daily task counter with auto-reset
-- **System Health Monitoring**: Live CPU/memory load with 7-day history
-- **UX Metrics**: Active user tracking, response time analysis, daily activity trends
+### Media & Video Support
+- **Hybrid Media Processing**: Dedicated support for both `IMAGE` and `VIDEO` media types.
+- **Video Analytics**: Specialized `VideoDetection` models to store object timestamps and specific frame paths within videos.
+- **Automated Cleanup**: A background task automatically prunes temporary video processing directories every 24 hours.
+- **HuggingFace Integration**: Seamless, asynchronous upload of media to HuggingFace Hub datasets.
 
-### Media Vault
-- **Personal Media Library**: View and manage user's uploaded media items
-- **Advanced Search & Filtering**: 
-  - Search by filename
-  - Filter by media status
-  - Sort by creation date, filename, or status
-  - Configurable pagination (page/page_size)
-- **Media Details**: Access comprehensive metadata including image URLs, technical metadata, and update timestamps
-- **Media Deletion**: Delete media items from personal vault with permission validation
-- **Bulk Cleanup**: Delete all vault media for the authenticated user in one request
-- **Worker Assignment Tracking**: View which AI worker is assigned to process each media item
-
-### Map & Geospatial Analytics
-- **PostGIS Integration**: Spatial queries powered by PostGIS for efficient geospatial operations
-- **Map Data Feed**: Retrieve geotagged user media points with optional bounding-box and confidence filters
-- **Grid Stats API**: Get cell-based density, average confidence, and dominant detection label using ST_SnapToGrid
-- **Spatial Indexing**: GIST index on location column for optimized spatial queries using ST_Intersects
-- **Media Log Timeline**: Fetch per-media processing history for map-selected items
-- **Short-Lived Map Stats Cache**: 60-second in-memory cache for repeated stats queries
+### Geospatial Analytics (PostGIS)
+- **Spatial Power**: Leverages **PostGIS** for high-performance geospatial operations.
+- **Optimized Search**: Uses **GIST indexing** on location columns for fast bounding-box and proximity queries.
+- **Grid Statistics**: Aggregates detection data into geographic grids for heatmaps and density analysis.
+- **Rich Metadata**: Stores precision coordinates, altitude, and human-readable addresses for every media item.
 
 ### Statistics & Reporting
-- **6 KPI Endpoints** for authenticated users:
-  - Trash Composition (`/api/stats/trash-composition`)
-  - Environmental Footprint (`/api/stats/environmental-footprint`)
-  - AI Fleet Efficiency (`/api/stats/ai-fleet-efficiency`)
-  - Temporal Trends (`/api/stats/temporal-trends?days=1..365`)
-  - Mean Time to Process (`/api/stats/mean-time-to-process`)
-  - Hotspot Density (`/api/stats/hotspot-density`)
-- **Unified Stats Summary**: `/api/stats/summary` aggregates all KPIs in a single response
-- **Parallel KPI Aggregation**: Summary/report endpoints fetch KPI data concurrently with `asyncio.gather`
-- **Stats Cache**: 5-minute in-memory cache for summary requests keyed by `(user_id, days)`
-- **Fun Facts API**: `/api/stats/fun-facts` with personalized insights, icon metadata, and bilingual output (`en`/`hu`)
-- **Excel Manifest Export**: `/api/stats/reports/manifest` generates detection-level `.xlsx` cleanup manifests (localized filename/header labels)
-- **PDF Report Export**: `/api/stats/reports/pdf` generates branded KPI reports in English or Hungarian
+- **KPI Engine**: 6 specialized endpoints providing data on trash composition, environmental footprint, fleet efficiency, and temporal trends.
+- **Bilingual Reporting**: Generate branded PDF reports and Excel cleanup manifests in both English and Hungarian.
+- **Performance Caching**: 5-minute in-memory cache for complex statistical aggregations.
 
-### Media Upload
-- **Batch File Upload**: Upload multiple image files simultaneously with automatic image dimension extraction (width, height, size)
-- **HuggingFace Integration**: Automatic upload to HuggingFace Hub with organized date-based directory structure
-- **Background Processing**: Asynchronous HuggingFace upload with task queue integration
-- **Status Tracking**: Real-time media processing status via WebSocket with image URL updates
-- **Recent Media Retrieval**: Quick access to 4 most recently uploaded items
-- **Complete Media Status Pipeline**: 
-  - PENDING → UPLOADED → EXTRACTING → PROCESSING → READY (or FAILED at any step)
-  - Automatic status transitions with logging
-  - Per-media item task logs tracking all status changes and actions
-
-### AI Worker Fleet Processing
-- **Dedicated Task Workers**: 10 persistent background workers continuously processing uploaded media
-- **Automated Task Distribution**: Workers automatically claim and process queued tasks (FIFO)
-- **Multi-Stage Processing**: Each task progresses through extraction (5s) → processing (20s) → completion stages
-- **Real-Time Status Updates**: Users notified via WebSocket as their media progresses through each stage
-- **Daily Task Counters**: Automatic per-worker task count with daily auto-reset at midnight
-- **Online/Offline Detection**: Workers monitored with 2-minute ping timeout; cluster health assessed
-
-### Task Recovery & Reliability
-- **Reaper Process**: Background overseer that recovers stuck or abandoned tasks
-  - Detects stale PENDING tasks (>15 min idle) and marks as FAILED
-  - Detects stale UPLOADED tasks (>10 min without assignment) and notifies workers
-  - Detects offline workers and reassigns their in-progress tasks back to queue
-- **Media Task Logging**: Complete audit trail per media item tracking all status changes with timestamps and worker assignments
-- **Cluster Status Monitoring**: Real-time fleet health (Optimal/Degraded/Stressed) based on active worker count and processing load
-
-### Core Features
-- Async SQLAlchemy ORM with Postgres and asyncpg driver
-- Alembic database migrations with auto-migration support
-- Token blacklist for secure logout with automatic cleanup
-- CORS middleware with configurable frontend origins
-- Request tracking and UX metrics middleware (built-in to main app middleware)
-- Media task logging with full audit trail (status changes, worker assignments, timestamps)
-- Nanoid ID generation for users and UUIDs for media items
-- Cascade delete relationships (deleting user cascades to media; deleting media cascades to logs)
+### AI Worker Fleet
+- **Persistent Workers**: A fleet of 10 background workers (Helios, Eos, etc.) handles heavy processing tasks.
+- **Status Pipeline**: Real-time tracking through `PENDING` → `UPLOADED` → `EXTRACTING` → `PROCESSING` → `READY` states.
+- **Reaper Process**: An automated overseer that identifies and recovers stuck tasks or reassigns work from offline nodes.
 
 ## Tech Stack
 
-- **Framework**: FastAPI + Uvicorn (async Python web framework)
-- **Database**: SQLAlchemy (async ORM) + Alembic (schema migrations) + Postgres + PostGIS + asyncpg (async driver)
-- **Geospatial**: GeoAlchemy2 + PostGIS (spatial types, indexes, and functions)
-- **Authentication**: JWT (python-jose) + bcrypt (password hashing)
-- **Real-Time**: WebSocket support with connection manager for live status updates
-- **Media Storage**: HuggingFace Hub API integration for dataset uploads
-- **System Monitoring**: psutil (with container-aware cgroup support)
-- **Image Processing**: Pillow (PIL) for image dimension extraction
-- **Analytics & Reporting**: pandas + openpyxl (Excel manifest generation) + reportlab/xhtml2pdf (PDF reports)
-- **Utilities**: nanoid (ID generation), python-dotenv (environment config)
+- **Framework**: FastAPI (Async Python)
+- **Database**: PostgreSQL + **PostGIS** (Spatial extension)
+- **ORM**: SQLAlchemy (Async) + GeoAlchemy2
+- **Authentication**: JWT + Bcrypt
+- **Storage**: HuggingFace Hub API
+- **Monitoring**: psutil (Container-aware)
+- **Reporting**: Pandas, openpyxl, xhtml2pdf
 
-## Requirements
+## API Overview (Key Routes)
 
-- Python 3.10+
-- Postgres database with PostGIS extension (use `postgis/postgis:latest` Docker image)
+### Lab - AI Fine-tuning & Validation
+- `GET /api/lab/image/{media_id}` – Retrieve image data and current detections for validation.
+- `GET /api/lab/video/{media_id}` – Retrieve detailed video detection data.
+- `PATCH /api/lab/{media_id}` – Update/validate location, address, and detections.
 
-## Environment Variables
+### Dashboard & System
+- `GET /api/health` – System health check and database latency.
+- `GET /api/dashboard/ai-workers` – Fleet status, queue depth, and worker health.
+- `GET /api/dashboard/system-health` – Real-time CPU, memory, and load history.
 
-Create a `.env` file in the project root or export these variables in your shell.
+### Vault & Map
+- `GET /api/vault` – Personal media library with advanced filtering and search.
+- `GET /api/map` – Geospatial feed of tagged media points.
 
-| Name | Required | Example | Notes |
-| --- | --- | --- | --- |
-| `DATABASE_URL` | Yes | `postgresql+asyncpg://user:pass@localhost:5432/hyperion` | Async SQLAlchemy URL for Postgres |
-| `SECRET_KEY` | Yes | `your-secret-key-here` | App fails fast if missing; used for JWT signing and token validation |
-| `HF_TOKEN` | Yes* | `hf_xxxxxxxxxxxx` | HuggingFace API token for dataset uploads (*required if using upload features) |
-| `HF_REPO_ID` | Yes* | `username/hyperion-media` | HuggingFace dataset repo (*required if using upload features) |
-| `FRONTEND_URL` | No | `http://localhost:5173` | CORS allowlist; defaults to `http://localhost:5173` |
+## Automated Maintenance (Lifespan Tasks)
+The application handles several background processes automatically on startup:
+- **Blacklist Pruner**: Hourly cleanup of expired tokens from the database.
+- **Video Cleanup**: Daily removal of temporary video processing files.
+- **Worker Init**: Automatic synchronization of the AI worker fleet state.
 
-## Local Development
+## Getting Started
 
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-
-# run the API
-uvicorn main:app --reload
-```
-
-The API will be available at `http://127.0.0.1:8000` by default.
-
-### Windows (PowerShell)
-
-```powershell
-py -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-alembic upgrade head
-uvicorn main:app --reload
-```
-
-## Database Migrations
-
-Alembic reads `DATABASE_URL` from the environment.
-
-```bash
-alembic upgrade head
-```
-
-## Docker
-
-The Docker image runs on port `7860` (Hugging Face Spaces default).
-
-```bash
-docker build -t hyperion-backend .
-docker run --rm -p 7860:7860 --env-file .env hyperion-backend
-```
-
-## API Overview
-
-### Public
-
-- `GET /` → Basic status message
-- `GET /api/health` → Health check with database latency (returns 503 if database is down)
-- `POST /api/auth/signup` → Create user account
-- `POST /api/auth/login` → Login, sets `access_token` HttpOnly cookie
-- `POST /api/auth/logout` → Logout, clears cookies and blacklists token
-
-### Authenticated Routes (Cookie-based)
-
-#### Auth
-- `GET /api/auth/me` → Get current user profile (id, email, full_name, language)
-- `PUT /api/auth/me` → Update user profile (full_name, language)
-
-#### Dashboard - AI Workers
-- `GET /api/dashboard/ai-workers` → Get fleet status (active worker count, cluster health assessment, per-worker task counts, current task tracking, queue depth)
-- `POST /api/dashboard/ai-workers/dispatch` → Dispatch a task to the worker queue (triggers worker assignment)
-
-#### Dashboard - System Health
-- `GET /api/dashboard/system-health` → Get real-time hardware metrics (CPU %, memory %, uptime %, 7-day load history, system status classification, environment info)
-
-#### Dashboard - User Experience
-- `GET /api/dashboard/user-experience` → Get engagement analytics (currently active users, active user trend history, average response time, 7-day daily activity trends, last update timestamp)
-
-#### Vault - Personal Media Library
-- `GET /api/vault` → Retrieve user's media library with search, filtering, sorting, and pagination (query params: search, status, order_by, direction, page, page_size)
-- `DELETE /api/vault/all` → Delete all media items owned by the authenticated user
-- `DELETE /api/vault/{id}` → Delete a media item from personal vault
-
-#### Upload - Media Management
-- `POST /api/upload/files` → Batch upload multiple image files with automatic dimension extraction (creates PENDING media records, queues background HF upload)
-- `GET /api/upload/recents` → Get 4 most recently uploaded media items with current status and metadata
-- `WebSocket /api/upload/ws/updates` → Real-time status updates (auth via `access_token` cookie or `token` query param)
-
-#### Map - Geospatial Data
-- `GET /api/map` → Get user geotagged media points (query params: min_lat, max_lat, min_lng, max_lng, has_trash, min_confidence)
-- `GET /api/map/stats` → Get grid-aggregated map stats (required query params: min_lat, max_lat, min_lng, max_lng; optional: resolution)
-- `GET /api/map/{id}/logs` → Get processing/log history for one media item
-
-#### Statistics & Reports
-- `GET /api/stats/trash-composition` → Trash label distribution with counts and percentages
-- `GET /api/stats/environmental-footprint` → Total detected area (`sqm`) and detection count
-- `GET /api/stats/ai-fleet-efficiency` → Per-worker success/failure metrics and fleet reliability score
-- `GET /api/stats/temporal-trends` → Daily detection trend series (`days` query param: `1..365`, default `7`)
-- `GET /api/stats/mean-time-to-process` → Overall and per-worker average processing duration
-- `GET /api/stats/hotspot-density` → High-confidence hotspot and media counts
-- `GET /api/stats/summary` → Combined response for all six KPIs (summary dashboard endpoint)
-- `GET /api/stats/fun-facts` → Personalized facts (`limit` query param: `1..5`, `lang`: `en|hu`)
-- `GET /api/stats/reports/manifest` → Download localized cleanup manifest Excel report (`days`: `1..365`, default `30`; `language`: `en|hu`)
-- `GET /api/stats/reports/pdf` → Download localized KPI PDF report (`days`: `1..365`, default `7`; `language`: `en|hu`)
-
-## Notes
-
-- JWT access tokens expire in **30 minutes**; the login cookie is set for **60 minutes**
-- `SECRET_KEY` must be set for the app to start; used for JWT signing and token validation
-- The AI worker fleet consists of **10 persistent workers** started at app startup and continuously processes queued media
-- Media status pipeline: PENDING (initial upload) → UPLOADED (HF upload complete) → EXTRACTING (worker extraction phase) → PROCESSING (worker processing phase) → READY (complete) or FAILED (at any step)
-- **Reaper process**: Runs every 10 minutes to detect and recover stuck tasks (>15 min PENDING timeout, >10 min UPLOADED timeout) and reassign tasks from offline workers
-- **Worker health monitoring**: Workers marked offline if last_ping > 2 minutes; cluster status determined by active worker count (Optimal ≥3, Degraded <3, Stressed ≥8 working)
-- System health metrics are **container-aware** and read from cgroup files when deployed in Docker/Kubernetes; falls back to psutil if unavailable
-- UX metrics track active users with a **5-minute session timeout** and reset daily activity counters and session tables at midnight UTC
-- Token blacklist is stored in the database for secure logout; all tokens checked against blacklist on authenticated requests
-- Request tracking middleware measures response times for all routes and maintains active user session pool
-- Media files uploaded to HuggingFace Hub with structure: `media/{user_id}/{YYYY-MM-DD}/{media_id}_{filename}`
-- Stats summary cache TTL is **300 seconds (5 minutes)** and cache keys are scoped by `(user_id, days)`
-- Statistics report endpoints support bilingual output via `language=en|hu` and return downloadable files with timestamped filenames
-- Temporal statistics windows use `days` constraints of **1..365** (`/api/stats/summary`, `/api/stats/temporal-trends`, `/api/stats/reports/*`)
-- Database migrations use Alembic and must be run before first startup: `alembic upgrade head`
-- All timestamps use UTC timezone internally (timezone.utc)
-- Auth cookie is set with `HttpOnly`, `SameSite=None`, and `Secure=True`; browser-based local development may require HTTPS or token-query fallback for WebSocket auth
+1. Configure your `.env` file with `DATABASE_URL`, `SECRET_KEY`, and `HF_TOKEN`.
+2. Run database migrations:
+   ```bash
+   alembic upgrade head
 
 ## License
 
