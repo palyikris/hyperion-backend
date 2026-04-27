@@ -9,7 +9,12 @@ from app.database import get_db
 from app.api.deps import get_current_user
 from app.models.db.Media import Media
 from app.models.db.Detection import Detection
-from app.models.lab.MediaResponse import MediaResponse, MediaPatchRequest
+from app.models.db.VideoDetection import VideoDetection
+from app.models.lab.MediaResponse import (
+    MediaResponse,
+    MediaPatchRequest,
+    VideoDetectionResponse,
+)
 from app.api.medialog_utils.media_log_utils import create_status_change_log
 from app.api.upload_utils.metadata_extractor import get_address_from_coords
 
@@ -56,8 +61,26 @@ def _serialize_media(media: Media) -> dict:
     }
 
 
+def _serialize_video_detection(video_det: VideoDetection) -> dict:
+    return {
+        "id": str(video_det.id),
+        "media_id": str(video_det.media_id),
+        "lat": video_det.lat,
+        "lng": video_det.lng,
+        "altitude": video_det.altitude,
+        "address": video_det.address,
+        "label": video_det.label,
+        "confidence": video_det.confidence,
+        "bbox": video_det.bbox,
+        "timestamp_in_video": video_det.timestamp_in_video,
+        "frame_hf_path": video_det.frame_hf_path,
+        "created_at": video_det.created_at,
+        "area_sqm": video_det.area_sqm,
+    }
+
+
 @router.get(
-    "/{media_id}",
+    "/image/{media_id}",
     status_code=status.HTTP_200_OK,
     response_model=MediaResponse,
 )
@@ -98,6 +121,46 @@ async def get_media(
         )
 
     return _serialize_media(media)
+
+
+@router.get(
+    "/video/{media_id}",
+    status_code=status.HTTP_200_OK,
+    response_model=VideoDetectionResponse,
+)
+async def get_video_media(
+    media_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """
+    Get a video media item by ID.
+
+    Only returns media that belongs to the authenticated user.
+    """
+    try:
+        media_uuid = uuid.UUID(media_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid media ID format",
+        )
+
+    query = select(VideoDetection).where(
+        Media.id == media_uuid,
+        Media.uploader_id == current_user.id,
+    )
+
+    result = await db.execute(query)
+    detections = result.scalar_one_or_none()
+
+    if not detections:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Media not found",
+        )
+
+    return _serialize_video_detection(detections)
 
 
 @router.patch(

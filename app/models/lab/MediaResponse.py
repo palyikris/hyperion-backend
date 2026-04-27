@@ -42,6 +42,26 @@ class MediaResponse(BaseModel):
         from_attributes = True
 
 
+class VideoDetectionResponse(BaseModel):
+    id: str
+
+    media_id: str
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    altitude: Optional[float] = None
+    address: Optional[str] = None
+    label: str
+    confidence: float
+    bbox: dict  # {"x", "y", "w", "h"}
+
+    timestamp_in_video: int  # Seconds
+
+    frame_hf_path: str
+
+    created_at: datetime
+    area_sqm: Optional[float] = None
+
+
 class MediaPatchRequest(BaseModel):
     """Request model for PATCH endpoint"""
     lat: Optional[float] = None
