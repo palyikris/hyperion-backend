@@ -72,7 +72,11 @@ def _serialize_video_detection(video_det: VideoDetection) -> dict:
         "label": video_det.label,
         "confidence": video_det.confidence,
         "bbox": video_det.bbox,
-        "timestamp_in_video": video_det.timestamp_in_video,
+        "timestamp_in_video": (
+            int(video_det.timestamp_in_video)
+            if video_det.timestamp_in_video is not None
+            else None
+        ),
         "frame_hf_path": video_det.frame_hf_path,
         "created_at": video_det.created_at,
         "area_sqm": video_det.area_sqm,
@@ -147,8 +151,13 @@ async def get_video_media(
         )
 
     query = select(VideoDetection).where(
-        Media.id == media_uuid,
-        Media.uploader_id == current_user.id,
+        VideoDetection.id == media_uuid,
+        select(Media)
+        .where(
+            Media.id == VideoDetection.media_id,
+            Media.uploader_id == current_user.id,
+        )
+        .exists(),
     )
 
     result = await db.execute(query)
