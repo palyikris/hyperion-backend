@@ -9,6 +9,7 @@ from fastapi import (
     Query,
     WebSocketException,
 )
+from app.database import AsyncSessionLocal
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.api.deps import get_current_user, get_current_user_from_token
@@ -456,7 +457,7 @@ async def video_cancel(
 async def websocket_updates(
     websocket: WebSocket,
     token: str | None = Query(None),
-    db: AsyncSession = Depends(get_db),
+    # REMOVE db = Depends(get_db)
 ):
     auth_token = websocket.cookies.get("access_token") or token
 
@@ -464,17 +465,23 @@ async def websocket_updates(
         await websocket.close(code=1008)
         return
 
+    # 1. Open a short-lived DB session JUST to authenticate the user
     try:
-        user = await get_current_user_from_token(token=auth_token, db=db)
-    except Exception:
+        async with AsyncSessionLocal() as db:
+            user = await get_current_user_from_token(token=auth_token, db=db)
+    except Exception as e:
+        print(f"WebSocket auth error: {e}")
         await websocket.close(code=1008)
         return
 
+    # The 'async with' block ends here. The DB connection is now safely returned
+    # to the pool, but we still have the `user` object in memory!
+
     await manager.connect(user.id, websocket)
 
+    # 2. Enter the infinite loop safely
     try:
         while True:
-            # not expecting any messages from client, but keeping connection alive
             await websocket.receive_text()
     except WebSocketDisconnect:
         manager.disconnect(user.id)
