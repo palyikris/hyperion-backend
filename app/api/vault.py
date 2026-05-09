@@ -1,3 +1,4 @@
+import logging
 from fastapi import APIRouter, Depends, Query, status, HTTPException
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,6 +15,17 @@ from app.api.upload_utils.hf_upload import delete_from_hf
 from app.api.vault_utils.temp_file_finder import find_temp_video_file
 
 router = APIRouter()
+
+# Configure logger for this module
+logger = logging.getLogger("vault_api")
+if not logger.hasHandlers():
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter(
+        "[%(asctime)s] %(levelname)s in %(module)s: %(message)s"
+    )
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+logger.setLevel(logging.INFO)
 
 
 @router.get(
@@ -38,6 +50,9 @@ async def get_media_vault(
     """
     Retrieves the user's personal media library with advanced search and filtering.
     """
+
+    print(f"!!! MY ACTIVE USER ID IS: {current_user.id} !!!")  # <--- ADD THIS
+
     query = select(Media).where(Media.uploader_id == current_user.id)
     video_query = select(VideoDetection).where(
         VideoDetection.media_id.in_(
@@ -108,6 +123,7 @@ async def get_media_vault(
                 )
             )
         )
+
     if search:
         count_query = count_query.where(
             Media.initial_metadata["filename"].as_string().ilike(f"%{search}%")
@@ -135,58 +151,55 @@ async def get_media_vault(
     records = result.scalars().all()
     video_detections = video_result.scalars().all()
 
-    return JSONResponse(
-        content={
-            "total": total + total_video_detections,
-            "page": page,
-            "page_size": page_size,
-            "total_pages": (total + total_video_detections + page_size - 1)
-            // page_size,
-            "image_items": [
-                {
-                    "id": str(media.id),
-                    "uploader_id": str(media.uploader_id),
-                    "status": (
-                        media.status.value
-                        if hasattr(media.status, "value")
-                        else media.status
-                    ),
-                    "hf_path": media.hf_path,
-                    "initial_metadata": media.initial_metadata,
-                    "technical_metadata": media.technical_metadata,
-                    "assigned_worker": media.assigned_worker,
-                    "created_at": media.created_at.isoformat(),
-                    "updated_at": media.updated_at.isoformat(),
-                    "lat": media.lat,
-                    "lng": media.lng,
-                    "altitude": media.altitude,
-                    "address": media.address,
-                    "has_trash": media.has_trash,
-                    "confidence": media.confidence,
-                    "failed_reason": media.failed_reason,
-                }
-                for media in records
-            ],
-            "video_items": [
-                {
-                    "id": str(video_det.id),
-                    "media_id": str(video_det.media_id),
-                    "lat": video_det.lat,
-                    "lng": video_det.lng,
-                    "altitude": video_det.altitude,
-                    "address": video_det.address,
-                    "label": video_det.label,
-                    "confidence": video_det.confidence,
-                    "bbox": video_det.bbox,
-                    "timestamp_in_video": video_det.timestamp_in_video,
-                    "frame_hf_path": video_det.frame_hf_path,
-                    "created_at": video_det.created_at.isoformat(),
-                    "area_sqm": video_det.area_sqm,
-                }
-                for video_det in video_detections
-            ],
-        }
-    )
+    return {
+        "total": total + total_video_detections,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": (total + total_video_detections + page_size - 1) // page_size,
+        "image_items": [
+            {
+                "id": str(media.id),
+                "uploader_id": str(media.uploader_id),
+                "status": (
+                    media.status.value
+                    if hasattr(media.status, "value")
+                    else media.status
+                ),
+                "hf_path": media.hf_path,
+                "initial_metadata": media.initial_metadata,
+                "technical_metadata": media.technical_metadata,
+                "assigned_worker": media.assigned_worker,
+                "created_at": media.created_at.isoformat(),
+                "updated_at": media.updated_at.isoformat(),
+                "lat": media.lat,
+                "lng": media.lng,
+                "altitude": media.altitude,
+                "address": media.address,
+                "has_trash": media.has_trash,
+                "confidence": media.confidence,
+                "failed_reason": media.failed_reason,
+            }
+            for media in records
+        ],
+        "video_items": [
+            {
+                "id": str(video_det.id),
+                "media_id": str(video_det.media_id),
+                "lat": video_det.lat,
+                "lng": video_det.lng,
+                "altitude": video_det.altitude,
+                "address": video_det.address,
+                "label": video_det.label,
+                "confidence": video_det.confidence,
+                "bbox": video_det.bbox,
+                "timestamp_in_video": video_det.timestamp_in_video,
+                "frame_hf_path": video_det.frame_hf_path,
+                "created_at": video_det.created_at.isoformat(),
+                "area_sqm": video_det.area_sqm,
+            }
+            for video_det in video_detections
+        ],
+    }
 
 
 @router.delete("/vault/all", status_code=status.HTTP_200_OK)
@@ -197,6 +210,7 @@ async def delete_all_media(
     """
     Delete all media items from the user's vault, including images from HF dataset.
     """
+
     query = select(Media).where(Media.uploader_id == current_user.id)
     result = await db.execute(query)
     media_items = result.scalars().all()
@@ -214,14 +228,17 @@ async def delete_all_media(
         .where(Media.original_media_id.in_(media_ids))
         .values(original_media_id=None)
     )
+    logger.info(f"Set original_media_id=None for media_ids: {media_ids}")
 
     for media in media_items:
         # Delete from HF dataset if hf_path exists
         if media.hf_path:
+            logger.info(f"Deleting from HF: hf_path={media.hf_path}, id={media.id}")
             await delete_from_hf(media.hf_path, media.id)
 
         await db.delete(media)
         deleted_count += 1
+        logger.info(f"Deleted media id={media.id}")
 
     await db.commit()
 
@@ -243,12 +260,16 @@ async def delete_media(
     Delete a media item from the user's vault, including the image from HF dataset.
     If the media is a video, also check for its temp file.
     """
+
     query = select(Media).where(Media.id == id, Media.uploader_id == current_user.id)
+    logger.info(f"Delete single media query: {query}")
     result = await db.execute(query)
     media = result.scalar_one_or_none()
     video_detections_query = select(VideoDetection).where(VideoDetection.media_id == id)
+    logger.info(f"Delete single media video detections query: {video_detections_query}")
     video_detections_result = await db.execute(video_detections_query)
     video_detections = video_detections_result.scalars().all()
+    logger.info(f"Found {len(video_detections)} video detections for media id={id}")
 
     if not media:
         raise HTTPException(
@@ -270,6 +291,7 @@ async def delete_media(
 
             if os.path.exists(local_video_path):
                 temp_file_path = local_video_path
+                logger.info(f"Found local video path for deletion: {temp_file_path}")
         else:
             filename = (
                 media.initial_metadata.get("filename")
@@ -278,24 +300,32 @@ async def delete_media(
             )
             if filename:
                 temp_file_path = find_temp_video_file(filename)
+                logger.info(f"Found temp video file by filename: {temp_file_path}")
 
     # remove the temp file if found
+
     if temp_file_path:
         import os
 
         try:
             os.remove(temp_file_path)
             temp_file_status = f"Temp video file deleted: {temp_file_path}"
+            logger.info(temp_file_status)
         except Exception as e:
             temp_file_status = f"Temp video file found but could not be deleted: {temp_file_path} ({e})"
+            logger.warning(temp_file_status)
     else:
         temp_file_status = None
 
     if video_detections:
         for detection in video_detections:
+            logger.info(
+                f"Deleting video detection frame from HF: frame_hf_path={detection.frame_hf_path}, id={detection.id}"
+            )
             await delete_from_hf(detection.frame_hf_path, detection.id)
 
     if media.hf_path:
+        logger.info(f"Deleting media from HF: hf_path={media.hf_path}, id={media.id}")
         await delete_from_hf(media.hf_path, media.id)
 
     await db.execute(
@@ -303,11 +333,14 @@ async def delete_media(
         .where(Media.original_media_id == media.id)
         .values(original_media_id=None)
     )
+    logger.info(f"Set original_media_id=None for media.id={media.id}")
 
     await db.delete(media)
+    logger.info(f"Deleted media id={media.id}")
     await db.commit()
 
     detail_msg = "Media deleted successfully"
     if temp_file_status:
         detail_msg += f"; {temp_file_status}"
+    logger.info(detail_msg)
     return JSONResponse(content={"detail": detail_msg})
