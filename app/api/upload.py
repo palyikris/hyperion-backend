@@ -36,7 +36,7 @@ from app.api.upload_utils.hf_upload import process_hf_upload
 from huggingface_hub import HfApi, CommitOperationAdd
 import shutil
 from app.models.db.Media import MediaType
-
+from app.models.db.VideoDetection import VideoDetection
 
 router = APIRouter()
 
@@ -147,37 +147,82 @@ async def batch_upload(
 @router.get(
     "/recents",
     status_code=status.HTTP_200_OK,
-    response_model=RecentsResponse,
+    # response_model=RecentsResponse, # You can comment this out or update the Pydantic model
 )
 async def get_recents(
     db: AsyncSession = Depends(get_db), current_user=Depends(get_current_user)
 ):
-    result = await db.execute(
+    # 1. Fetch 4 recent media items
+    media_query = (
         select(Media)
         .where(Media.uploader_id == current_user.id)
         .order_by(Media.created_at.desc())
         .limit(4)
     )
-    recent_media = result.scalars().all()
+    media_result = await db.execute(media_query)
+    recent_media = media_result.scalars().all()
 
-    return JSONResponse(
-        content={
-            "total": len(recent_media),
-            "items": [
-                {
-                    "id": str(media.id),
-                    "filename": media.initial_metadata.get("filename"),
-                    "status": media.status.value,
-                    "timestamp": media.created_at.isoformat(),
-                    "image_url": media.hf_path,
-                    "metadata": media.initial_metadata,
-                    "address": media.address,
-                    "failed_reason": media.failed_reason,
-                }
-                for media in recent_media
-            ],
-        }
+    # 2. Fetch 4 recent video detections
+    video_query = (
+        select(VideoDetection)
+        .where(
+            VideoDetection.media_id.in_(
+                select(Media.id).where(Media.uploader_id == current_user.id)
+            )
+        )
+        .order_by(VideoDetection.created_at.desc())
+        .limit(4)
     )
+    video_result = await db.execute(video_query)
+    recent_videos = video_result.scalars().all()
+
+    # 3. Return the exact same structure as the Vault endpoint
+    return {
+        "total": len(recent_media) + len(recent_videos),
+        "image_items": [
+            {
+                "id": str(media.id),
+                "uploader_id": str(media.uploader_id),
+                "status": (
+                    media.status.value
+                    if hasattr(media.status, "value")
+                    else media.status
+                ),
+                "hf_path": media.hf_path,
+                "initial_metadata": media.initial_metadata,
+                "technical_metadata": media.technical_metadata,
+                "assigned_worker": media.assigned_worker,
+                "created_at": media.created_at.isoformat(),
+                "updated_at": media.updated_at.isoformat(),
+                "lat": media.lat,
+                "lng": media.lng,
+                "altitude": media.altitude,
+                "address": media.address,
+                "has_trash": media.has_trash,
+                "confidence": media.confidence,
+                "failed_reason": media.failed_reason,
+            }
+            for media in recent_media
+        ],
+        "video_items": [
+            {
+                "id": str(video_det.id),
+                "media_id": str(video_det.media_id),
+                "lat": video_det.lat,
+                "lng": video_det.lng,
+                "altitude": video_det.altitude,
+                "address": video_det.address,
+                "label": video_det.label,
+                "confidence": video_det.confidence,
+                "bbox": video_det.bbox,
+                "timestamp_in_video": video_det.timestamp_in_video,
+                "frame_hf_path": video_det.frame_hf_path,
+                "created_at": video_det.created_at.isoformat(),
+                "area_sqm": video_det.area_sqm,
+            }
+            for video_det in recent_videos
+        ],
+    }
 
 
 from fastapi import Form
