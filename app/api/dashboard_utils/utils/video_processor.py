@@ -78,6 +78,11 @@ async def process_video_media(
                 logger.error(f"Media {media_id} not found.")
                 return
 
+            media.status = MediaStatus.PROCESSING
+            session.add(create_status_change_log(media.id, MediaStatus.PROCESSING))
+            await session.commit()
+            await manager.send_status(user_id, str(media_id), "PROCESSING")
+
             srt_path = f"{local_video_path}.srt"
             try:
                 await asyncio.to_thread(
