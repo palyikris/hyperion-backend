@@ -1,21 +1,21 @@
-name: Sync to Hugging Face Hub
-on:
-  push:
-    branches: [master]
-  workflow_dispatch:
+# name: Sync to Hugging Face Hub
+# on:
+#   push:
+#     branches: [master]
+#   workflow_dispatch:
 
-jobs:
-  sync-to-hub:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          lfs: true
-      - name: Push to hub
-        env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        run: |
-          # use HEAD:refs/heads/main to ensure it works 
-          # even if the local branch name differs or isn't fully initialized
-          git push --force https://palyikris:$HF_TOKEN@huggingface.co/spaces/palyikris/hyperion-backend HEAD:refs/heads/main
+# jobs:
+#   sync-to-hub:
+#     runs-on: ubuntu-latest
+#     steps:
+#       - uses: actions/checkout@v4
+#         with:
+#           fetch-depth: 0
+#           lfs: true
+#       - name: Push to hub
+#         env:
+#           HF_TOKEN: ${{ secrets.HF_TOKEN }}
+#         run: |
+#           # use HEAD:refs/heads/main to ensure it works 
+#           # even if the local branch name differs or isn't fully initialized
+#           git push --force https://palyikris:$HF_TOKEN@huggingface.co/spaces/palyikris/hyperion-backend HEAD:refs/heads/main
