@@ -74,7 +74,7 @@ import uuid
 @pytest_asyncio.fixture
 async def auth_client(client: AsyncClient, db_session: AsyncSession):
     test_user = User(
-        id=str(uuid.uuid4()),
+        id="test-user-123",
         email=f"vault_{uuid.uuid4()}@example.com",
         hashed_password=security.hash_password("password"),
         full_name="Vault Tester",
