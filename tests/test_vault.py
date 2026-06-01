@@ -40,13 +40,24 @@ async def test_get_vault_media(auth_client: dict, db_session: AsyncSession):
     assert data["items"][0]["status"] == "ready"
 
 
+from app.models.db.User import User  # Make sure this is imported at the top!
+
 async def test_vault_isolation(auth_client: dict, db_session: AsyncSession):
     """Ensure a user cannot see someone else's media."""
     client: AsyncClient = auth_client["client"]
 
+    other_user = User(
+        id="other_user_123",
+        email=f"other_{uuid.uuid4()}@example.com",
+        hashed_password="fake_password",
+        full_name="Other User",
+        language="en",
+    )
+    db_session.add(other_user)
+
     other_user_media = Media(
         id=uuid.uuid4(),
-        uploader_id="some_other_user_id",
+        uploader_id=other_user.id,  # <--- Use the newly created user's ID
         status=MediaStatus.READY,
         media_type=MediaType.IMAGE,
         created_at=datetime.utcnow(),
@@ -57,9 +68,10 @@ async def test_vault_isolation(auth_client: dict, db_session: AsyncSession):
     db_session.add(other_user_media)
     await db_session.commit()
 
-    response = await client.get("/api/vault/media")
+    response = await client.get("/api/vault")
 
     assert response.status_code == 200
     data = response.json()
 
-    assert len(data["items"]) == 0
+    assert len(data["image_items"]) == 0
+    assert len(data["video_items"]) == 0
