@@ -64,3 +64,28 @@ async def client(db_session):
         yield ac
 
     app.dependency_overrides.clear()
+
+
+from app.models.db.User import User
+from app.core import security
+
+
+@pytest_asyncio.fixture
+async def auth_client(client: AsyncClient, db_session: AsyncSession):
+    """Returns an AsyncClient that is already logged in as a test user."""
+    # 1. Create a dummy user in the database
+    test_user = User(
+        email="vault_tester@example.com",
+        hashed_password=security.hash_password("password"),
+        full_name="Vault Tester",
+        language="en",
+    )
+    db_session.add(test_user)
+    await db_session.commit()
+    await db_session.refresh(test_user)
+
+    token = security.create_access_token(data={"sub": test_user.email})
+
+    client.cookies.set("access_token", token, domain="test")
+
+    yield {"client": client, "user": test_user}
