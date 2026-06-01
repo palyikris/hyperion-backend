@@ -86,6 +86,6 @@ async def auth_client(client: AsyncClient, db_session: AsyncSession):
 
     token = security.create_access_token(data={"sub": test_user.email})
 
-    client.cookies.set("access_token", token, domain="test")
+    client.cookies.set("access_token", token, domain="test", path="/")
 
     yield {"client": client, "user": test_user}
