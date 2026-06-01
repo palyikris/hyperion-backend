@@ -44,7 +44,8 @@ jobs:
           pip install -r requirements.txt          
       - name: Run Alembic Migrations
         env:
-          DATABASE_URL: postgresql+asyncpg://test_user:test_pass@localhost:5432/hyperion_test
+          # Drop '+asyncpg' here so Alembic uses the synchronous psycopg2 driver
+          DATABASE_URL: postgresql://test_user:test_pass@localhost:5432/hyperion_test
         run: alembic upgrade head
           
       - name: Run Pytest
