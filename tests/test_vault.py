@@ -10,9 +10,9 @@ pytestmark = pytest.mark.asyncio
 
 
 async def test_get_vault_media(auth_client: dict, db_session: AsyncSession):
-  
+
     """Test that the vault endpoint returns media items belonging to the authenticated user."""
-  
+
     client: AsyncClient = auth_client["client"]
     user = auth_client["user"]
 

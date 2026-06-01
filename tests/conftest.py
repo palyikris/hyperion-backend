@@ -68,14 +68,14 @@ async def client(db_session):
 
 from app.models.db.User import User
 from app.core import security
-
+import uuid
 
 @pytest_asyncio.fixture
 async def auth_client(client: AsyncClient, db_session: AsyncSession):
     """Returns an AsyncClient that is already logged in as a test user."""
     # 1. Create a dummy user in the database
     test_user = User(
-        email="vault_tester@example.com",
+        email=f"vault_{uuid.uuid4()}@example.com",
         hashed_password=security.hash_password("password"),
         full_name="Vault Tester",
         language="en",
