@@ -22,8 +22,8 @@ async def test_get_vault_media(auth_client: dict, db_session: AsyncSession):
         uploader_id=user.id,
         status=MediaStatus.READY,
         media_type="video",
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
         has_trash=True,
         confidence=0.95,
     )
@@ -49,8 +49,8 @@ async def test_vault_isolation(auth_client: dict, db_session: AsyncSession):
         uploader_id="some_other_user_id",
         status=MediaStatus.READY,
         media_type="image",
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow(),
         has_trash=False,
         confidence=0.0,
     )

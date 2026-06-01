@@ -11,4 +11,5 @@ async def test_system_health_check(client: AsyncClient):
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "healthy"
-    assert "database" in data
+    assert "database" in data["components"]
+    assert data["components"]["database"] == "up"
