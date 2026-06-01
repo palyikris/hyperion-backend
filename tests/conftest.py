@@ -70,11 +70,11 @@ from app.models.db.User import User
 from app.core import security
 import uuid
 
+
 @pytest_asyncio.fixture
 async def auth_client(client: AsyncClient, db_session: AsyncSession):
-    """Returns an AsyncClient that is already logged in as a test user."""
-    # 1. Create a dummy user in the database
     test_user = User(
+        id=str(uuid.uuid4()),
         email=f"vault_{uuid.uuid4()}@example.com",
         hashed_password=security.hash_password("password"),
         full_name="Vault Tester",
@@ -82,11 +82,9 @@ async def auth_client(client: AsyncClient, db_session: AsyncSession):
     )
     db_session.add(test_user)
     await db_session.commit()
-    await db_session.refresh(test_user)
 
     token = security.create_access_token(data={"sub": test_user.email})
 
-    # UPDATED: Explicitly set the cookie for the 'test' domain and '/' path
     client.cookies.set("access_token", token, domain="test", path="/")
 
     yield {"client": client, "user": test_user}
