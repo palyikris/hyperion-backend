@@ -30,7 +30,7 @@ async def test_get_vault_media(auth_client: dict, db_session: AsyncSession):
     db_session.add(fake_media)
     await db_session.commit()
 
-    response = await client.get("/api/vault/media")
+    response = await client.get("/api/vault")
 
     assert response.status_code == 200
     data = response.json()
