@@ -78,6 +78,53 @@ async def process_video_media(
                 logger.error(f"Media {media_id} not found.")
                 return
 
+            filename = media.initial_metadata.get("filename")
+
+            if filename:
+                duplicate_query = (
+                    select(Media)
+                    .where(
+                        Media.uploader_id == user_id,
+                        Media.id != media_id,
+                        Media.status == MediaStatus.READY,
+                        Media.initial_metadata["filename"].as_string() == str(filename),
+                    )
+                    .limit(1)
+                )
+
+                duplicate_result = await session.execute(duplicate_query)
+                duplicate_media = duplicate_result.scalars().first()
+
+                if duplicate_media:
+                    logger.info(
+                        f"Duplicate video found for {media_id}. Cancelling processing."
+                    )
+                    media.status = MediaStatus.FAILED
+                    media.failed_reason = f"Duplicate of {filename}"
+
+                    # Optional: link to original if your DB supports it
+                    if hasattr(media, "original_media_id"):
+                        media.original_media_id = duplicate_media.id
+
+                    session.add(
+                        create_status_change_log(
+                            media.id, MediaStatus.FAILED, detail="Duplicate detected"
+                        )
+                    )
+                    await session.commit()
+                    await manager.send_status(
+                        user_id,
+                        str(media_id),
+                        "FAILED",
+                        failed_reason="Duplicate video detected.",
+                    )
+                    return
+
+            media.status = MediaStatus.PROCESSING
+            session.add(create_status_change_log(media.id, MediaStatus.PROCESSING))
+            await session.commit()
+            await manager.send_status(user_id, str(media_id), "PROCESSING")
+
             srt_path = f"{local_video_path}.srt"
             try:
                 await asyncio.to_thread(
@@ -301,14 +348,6 @@ async def process_video_media(
                 await asyncio.to_thread(
                     os.remove, local_video_path if local_video_path else ""
                 )
-        except Exception:
-            pass
-
-        try:
-            if local_video_path and await asyncio.to_thread(
-                os.path.exists, local_video_path
-            ):
-                await asyncio.to_thread(os.remove, local_video_path)
         except Exception:
             pass
 

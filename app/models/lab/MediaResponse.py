@@ -69,3 +69,4 @@ class MediaPatchRequest(BaseModel):
     altitude: Optional[float] = None
     address: Optional[str] = None
     detections: Optional[List[DetectionInput]] = None
+    item_type: Optional[str] = None
