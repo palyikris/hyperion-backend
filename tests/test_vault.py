@@ -1,7 +1,7 @@
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.models.db.Media import Media
+from app.models.db.Media import Media, MediaType
 from app.models.upload.MediaStatus import MediaStatus
 import uuid
 from datetime import datetime, timezone
@@ -21,7 +21,7 @@ async def test_get_vault_media(auth_client: dict, db_session: AsyncSession):
         id=media_id,
         uploader_id=user.id,
         status=MediaStatus.READY,
-        media_type="video",
+        media_type=MediaType.VIDEO,
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow(),
         has_trash=True,
@@ -37,7 +37,7 @@ async def test_get_vault_media(auth_client: dict, db_session: AsyncSession):
 
     assert len(data["items"]) == 1
     assert data["items"][0]["id"] == str(media_id)
-    assert data["items"][0]["status"] == "processed"
+    assert data["items"][0]["status"] == "ready"
 
 
 async def test_vault_isolation(auth_client: dict, db_session: AsyncSession):
@@ -48,7 +48,7 @@ async def test_vault_isolation(auth_client: dict, db_session: AsyncSession):
         id=uuid.uuid4(),
         uploader_id="some_other_user_id",
         status=MediaStatus.READY,
-        media_type="image",
+        media_type=MediaType.IMAGE,
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow(),
         has_trash=False,
