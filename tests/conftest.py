@@ -18,9 +18,12 @@ TEST_DATABASE_URL = os.getenv(
 @pytest_asyncio.fixture(scope="session", autouse=True)
 async def setup_database():
     """Runs once per test session to create and drop tables."""
+
     # Create a temporary engine just for setup
     engine = create_async_engine(TEST_DATABASE_URL, poolclass=NullPool)
     async with engine.begin() as conn:
+        await conn.execute(text("DROP TABLE IF EXISTS alembic_version;"))
+
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS postgis;"))
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)

@@ -18,5 +18,5 @@ class MediaLog(Base):
     )  # e.g., "Helios started extraction"
 
     timestamp: Mapped[datetime] = mapped_column(
-        DateTime, default=lambda: datetime.now(timezone.utc)
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
