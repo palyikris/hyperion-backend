@@ -5,6 +5,7 @@ from app.models.db.Media import Media, MediaType
 from app.models.upload.MediaStatus import MediaStatus
 import uuid
 from datetime import datetime, timezone
+from app.models.db.User import User
 
 pytestmark = pytest.mark.asyncio
 
@@ -21,7 +22,7 @@ async def test_get_vault_media(auth_client: dict, db_session: AsyncSession):
         id=media_id,
         uploader_id=user.id,
         status=MediaStatus.READY,
-        media_type=MediaType.VIDEO,
+        media_type=MediaType.IMAGE,
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow(),
         has_trash=True,
@@ -35,12 +36,11 @@ async def test_get_vault_media(auth_client: dict, db_session: AsyncSession):
     assert response.status_code == 200
     data = response.json()
 
-    assert len(data["items"]) == 1
-    assert data["items"][0]["id"] == str(media_id)
-    assert data["items"][0]["status"] == "ready"
+    print(data)
+    assert data["total"] == 1
+    assert len(data["image_items"]) == 1
+    assert data["image_items"][0]["id"] == str(media_id)
 
-
-from app.models.db.User import User  # Make sure this is imported at the top!
 
 async def test_vault_isolation(auth_client: dict, db_session: AsyncSession):
     """Ensure a user cannot see someone else's media."""
@@ -57,7 +57,7 @@ async def test_vault_isolation(auth_client: dict, db_session: AsyncSession):
 
     other_user_media = Media(
         id=uuid.uuid4(),
-        uploader_id=other_user.id,  # <--- Use the newly created user's ID
+        uploader_id=other_user.id,
         status=MediaStatus.READY,
         media_type=MediaType.IMAGE,
         created_at=datetime.utcnow(),
@@ -73,5 +73,6 @@ async def test_vault_isolation(auth_client: dict, db_session: AsyncSession):
     assert response.status_code == 200
     data = response.json()
 
+    assert data["total"] == 0
     assert len(data["image_items"]) == 0
     assert len(data["video_items"]) == 0

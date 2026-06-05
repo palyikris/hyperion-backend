@@ -8,10 +8,12 @@ from sqlalchemy import text
 from main import app
 from app.database import get_db, Base
 
-TEST_DATABASE_URL = (
-    "postgresql+asyncpg://test_user:test_pass@localhost:5432/hyperion_test"
-)
+import os
 
+TEST_DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    "postgresql+asyncpg://test_user:test_pass@localhost:5432/hyperion_test",
+)
 
 @pytest_asyncio.fixture(scope="session", autouse=True)
 async def setup_database():
@@ -74,7 +76,7 @@ import uuid
 @pytest_asyncio.fixture
 async def auth_client(client: AsyncClient, db_session: AsyncSession):
 
-    user_id = str(uuid.uuid4())
+    user_id = str(uuid.uuid4())[:20]
 
     test_user = User(
         id=user_id,
@@ -88,6 +90,6 @@ async def auth_client(client: AsyncClient, db_session: AsyncSession):
 
     token = security.create_access_token(data={"sub": test_user.email})
 
-    client.cookies.set("access_token", token, domain="test", path="/")
+    client.cookies.set("access_token", token)
 
     yield {"client": client, "user": test_user}
