@@ -51,6 +51,10 @@ async def get_real_detections(image_path):
                 )
 
                 if response.status_code == 200:
+                    logger.info(
+                        f"Successfully received response from AI Worker for {image_path}"
+                    )
+                    logger.debug(f"Response JSON: {response.json()}")
                     detections = response.json().get("detections", [])
                     logger.info(
                         f"AI Worker found {len(detections)} objects in {image_path}"
