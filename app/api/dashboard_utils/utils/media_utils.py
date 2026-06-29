@@ -144,9 +144,6 @@ def generate_fake_detections(media_id):
         )
     return detections
 
-def simulation_processing_delay_seconds() -> float:
-    return round(random.uniform(1.5, 5.0), 2)
-
 
 import random
 

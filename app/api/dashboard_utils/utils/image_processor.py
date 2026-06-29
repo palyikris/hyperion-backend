@@ -5,7 +5,6 @@ from app.api.dashboard_utils.utils.media_utils import (
     detect_duplicate,
     is_image_media,
     generate_fake_detections,
-    simulation_processing_delay_seconds,
 )
 from app.api.upload_utils.conn_manager import manager
 from app.models.db.Media import Media
@@ -105,8 +104,6 @@ async def process_image_media(media_task, name, uploader_id):
         status=MediaStatus.PROCESSING.value,
         worker=name,
     )
-
-    await asyncio.sleep(simulation_processing_delay_seconds())
 
     async with AsyncSessionLocal() as session:
         res = await session.execute(select(Media).where(Media.id == media_task_id))
