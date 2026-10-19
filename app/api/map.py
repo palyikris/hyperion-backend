@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, case, and_, desc
+from sqlalchemy import select, func, case, and_, desc, or_
 from sqlalchemy.orm import selectinload
 from geoalchemy2.functions import (
     ST_Intersects,
@@ -70,7 +70,14 @@ async def get_map_data(
         video_query = video_query.where(ST_Intersects(VideoDetection.location, bbox))
 
     if has_trash is not None:
-        image_query = image_query.where(Media.has_trash == has_trash)
+        if has_trash:
+            image_query = image_query.where(
+                or_(Media.has_trash.is_(True), Media.detections.any())
+            )
+        else:
+            image_query = image_query.where(
+                and_(Media.has_trash.is_(False), ~Media.detections.any())
+            )
 
     if min_confidence is not None and min_confidence > 0:
         image_query = image_query.where(Media.confidence >= min_confidence)
@@ -127,7 +134,9 @@ async def get_map_data(
                     "altitude": m.altitude,
                     "address": m.address,
                     "image_url": m.hf_path,
-                    "has_trash": m.has_trash,
+                    # Detection rows are authoritative when the cached summary
+                    # flag is stale (for example after manual Lab edits).
+                    "has_trash": m.has_trash or bool(m.detections),
                     "confidence": m.confidence,
                     "detections": [
                         {
@@ -198,7 +207,7 @@ async def get_map_stats(
     media_filters = and_(
         Media.uploader_id == current_user.id,
         Media.location.isnot(None),
-        Media.has_trash.is_(True),
+        or_(Media.has_trash.is_(True), Media.detections.any()),
         ST_Intersects(Media.location, bbox),
     )
 

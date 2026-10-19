@@ -320,6 +320,11 @@ async def patch_media(
                 )
                 media.detections.append(new_detection)
 
+        if patch_data.item_type == "image":
+            # Keep the summary flag in sync with the manually validated
+            # detection list so map colors and trash filters agree.
+            media.has_trash = bool(media.detections)
+
     await db.commit()
 
     await db.refresh(media)
