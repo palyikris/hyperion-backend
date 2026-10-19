@@ -17,8 +17,12 @@ from app.api.medialog_utils.media_log_utils import create_status_change_log
 from app.models.db.Media import Media
 from app.models.upload.MediaStatus import MediaStatus
 from app.api.upload_utils.conn_manager import worker_signal, manager
-from PIL import Image
-import io
+from app.api.upload_utils.image_files import (
+    MAX_IMAGE_BYTES,
+    cleanup_image_files,
+    process_image_to_temp as _process_image_to_temp,
+)
+import hashlib
 import uuid
 import asyncio
 import tempfile
@@ -33,44 +37,12 @@ from app.api.upload_utils.video_file_helpers import (
     assemble_video_from_chunks,
 )
 from app.api.upload_utils.video_thumbnail import extract_video_thumbnail
-from app.api.upload_utils.hf_upload import process_hf_upload
 from huggingface_hub import HfApi, CommitOperationAdd
 import shutil
 from app.models.db.Media import MediaType
 from app.models.db.VideoDetection import VideoDetection
 
 router = APIRouter()
-
-THUMBNAIL_SIZE = (400, 400)
-
-
-def _process_image_to_temp(
-    content: bytes, media_id: uuid.UUID
-) -> tuple[int, int, str, str]:
-    """
-    CPU-bound image processing: extract dimensions, create thumbnail, and save both to temp files.
-    This function runs in a thread pool to avoid blocking the event loop.
-    Returns: (width, height, content_temp_path, thumbnail_temp_path)
-    """
-    img = Image.open(io.BytesIO(content))
-    width, height = img.size
-
-    thumbnail_img = img.copy()
-    thumbnail_img.thumbnail(THUMBNAIL_SIZE)
-    if thumbnail_img.mode != "RGB":
-        thumbnail_img = thumbnail_img.convert("RGB")
-
-    # Save original content to temp file
-    content_temp_path = os.path.join(tempfile.gettempdir(), f"{media_id}_content")
-    with open(content_temp_path, "wb") as f:
-        f.write(content)
-
-    # Save thumbnail to temp file
-    thumbnail_temp_path = os.path.join(tempfile.gettempdir(), f"{media_id}_thumbnail")
-    thumbnail_img.save(thumbnail_temp_path, format="JPEG", quality=85, optimize=True)
-
-    return width, height, content_temp_path, thumbnail_temp_path
-
 
 @router.post(
     "/files",
@@ -85,50 +57,64 @@ async def batch_upload(
 ):
     media_records = []
     files_to_process = []
+    temp_paths = []
 
-    for file in files:
-        content = await file.read()
-        media_id = uuid.uuid4()
+    try:
+        for file in files:
+            filename = (file.filename or "image").replace("\\", "/").rsplit("/", 1)[-1]
+            content = await file.read(MAX_IMAGE_BYTES + 1)
+            if len(content) > MAX_IMAGE_BYTES:
+                raise HTTPException(413, detail=f"{filename} exceeds the 50 MB image limit.")
+            media_id = uuid.uuid4()
+            # Track paths before starting the thread so cancellation also cleans up.
+            content_path = os.path.join(tempfile.gettempdir(), f"{media_id}_content")
+            thumbnail_path = os.path.join(tempfile.gettempdir(), f"{media_id}_thumbnail")
+            temp_paths.extend((content_path, thumbnail_path))
+            processing = asyncio.create_task(asyncio.to_thread(
+                _process_image_to_temp, content, media_id
+            ))
+            try:
+                width, height, content_path, thumbnail_path = await asyncio.shield(processing)
+            except asyncio.CancelledError:
+                # A running thread cannot be cancelled; wait before removing its output.
+                await asyncio.gather(processing, return_exceptions=True)
+                raise
+            except ValueError as error:
+                raise HTTPException(400, detail=f"{filename}: {error}") from error
 
-        # Run CPU-bound image processing in a thread and save to temp files
-        # This frees RAM immediately after processing each file
-        width, height, content_path, thumbnail_path = await asyncio.to_thread(
-            _process_image_to_temp, content, media_id
-        )
-        # Release the in-memory content immediately
-        del content
+            content_hash = hashlib.sha256(content).hexdigest()
+            del content
+            media_records.append(Media(
+                id=media_id,
+                uploader_id=current_user.id,
+                status=MediaStatus.PENDING,
+                initial_metadata={
+                    "filename": filename,
+                    "size": os.path.getsize(content_path),
+                    "width": width,
+                    "height": height,
+                    "sha256": content_hash,
+                },
+            ))
+            files_to_process.append((media_id, filename, content_path, thumbnail_path))
 
-        new_media = Media(
-            id=media_id,
-            uploader_id=current_user.id,
-            status=MediaStatus.PENDING,
-            initial_metadata={
-                "filename": file.filename,
-                "size": os.path.getsize(content_path),
-                "width": width,
-                "height": height,
-            },
-        )
+        # Validate the entire batch before creating records or publishing updates.
+        db.add_all(media_records)
+        for media in media_records:
+            db.add(create_status_change_log(media_id=media.id, status=MediaStatus.PENDING))
+        await db.commit()
+    except BaseException:
+        await db.rollback()
+        cleanup_image_files(temp_paths)
+        raise
 
-        insert_log = create_status_change_log(
-            media_id=media_id,
-            status=MediaStatus.PENDING,
-        )
-        db.add(insert_log)
-
+    for media in media_records:
         await manager.send_status(
             user_id=str(current_user.id),
-            media_id=str(media_id),
+            media_id=str(media.id),
             status=MediaStatus.PENDING.value,
             worker=None,
         )
-
-        media_records.append(new_media)
-        # Pass file paths instead of raw bytes
-        files_to_process.append((media_id, file.filename, content_path, thumbnail_path))
-
-    db.add_all(media_records)
-    await db.commit()
 
     background_tasks.add_task(
         process_hf_upload,
