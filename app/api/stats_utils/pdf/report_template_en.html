@@ -4,12 +4,21 @@
     <meta charset="UTF-8" />
     <title>Hyperion Impact Manifest</title>
     <style>
+        @font-face {
+            font-family: NotoSans;
+            src: url("{{ font_regular_path }}");
+        }
+        @font-face {
+            font-family: NotoSans;
+            src: url("{{ font_bold_path }}");
+            font-weight: bold;
+        }
         @page {
             size: A4;
             margin: 0;
         }
         body {
-            font-family: 'Helvetica', 'Arial', sans-serif;
+            font-family: NotoSans, sans-serif;
             background-color: #F8F9F4;
             color: #4B5563;
             margin: 0;
@@ -295,6 +304,33 @@
                     {% endfor %}
                 </tbody>
             </table>
+        </div>
+
+        <div style="page-break-before: always;">
+        <p>All-time metrics; the selected horizon applies to Temporal Pulse only.</p>
+        <div class="section-header"><h2>AI Fleet Efficiency</h2></div>
+        <div class="data-box">
+            <p>Successful: {{ fleet.total_successes | default(0) }} |
+               Failed: {{ fleet.total_failures | default(0) }} |
+               Reliability: {{ '%.2f' | format((fleet.fleet_reliability_score | default(1)) * 100) }}%</p>
+            <table class="data-table">
+                <thead><tr><th>Worker</th><th>Successful</th><th>Failed</th><th>Reliability</th></tr></thead>
+                <tbody>{% for worker in fleet.workers | default([]) %}
+                    <tr><td>{{ worker.name }}</td><td>{{ worker.success_count }}</td><td>{{ worker.failure_count }}</td>
+                    <td>{{ '%.2f' | format(worker.reliability_score * 100) }}%</td></tr>
+                {% endfor %}</tbody>
+            </table>
+        </div>
+        <div class="section-header"><h2>Mean Time to Process</h2></div>
+        <div class="data-box">
+            <p>Overall upload-to-ready average: {{ processing.overall_avg_seconds | default(0) }} seconds</p>
+            <table class="data-table">
+                <thead><tr><th>Worker</th><th>Tasks</th><th>Average (seconds)</th></tr></thead>
+                <tbody>{% for worker in processing.by_worker | default([]) %}
+                    <tr><td>{{ worker.worker_name }}</td><td>{{ worker.task_count }}</td><td>{{ worker.avg_processing_seconds }}</td></tr>
+                {% endfor %}</tbody>
+            </table>
+        </div>
         </div>
     </div>
 

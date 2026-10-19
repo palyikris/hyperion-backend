@@ -95,14 +95,8 @@ async def test_ai_fleet_efficiency_math():
 	db.execute.side_effect = [
 		FakeAllResult(
 			[
-				SimpleNamespace(assigned_worker="Helios", successes=3, failures=1),
-				SimpleNamespace(assigned_worker="Eos", successes=0, failures=0),
-			]
-		),
-		FakeScalarsResult(
-			[
-				SimpleNamespace(name="Helios", tasks_processed_today=7),
-				SimpleNamespace(name="Eos", tasks_processed_today=2),
+				SimpleNamespace(assigned_worker="Helios", successes=3, failures=1, tasks_today=2),
+				SimpleNamespace(assigned_worker="Eos", successes=0, failures=0, tasks_today=0),
 			]
 		),
 	]
@@ -116,11 +110,11 @@ async def test_ai_fleet_efficiency_math():
 	assert result.fleet_reliability_score == 0.75
 	assert workers_by_name["Helios"].success_count == 3
 	assert workers_by_name["Helios"].failure_count == 1
-	assert workers_by_name["Helios"].tasks_processed_today == 7
+	assert workers_by_name["Helios"].tasks_processed_today == 2
 	assert workers_by_name["Helios"].reliability_score == 0.75
 	assert workers_by_name["Eos"].success_count == 0
 	assert workers_by_name["Eos"].failure_count == 0
-	assert workers_by_name["Eos"].tasks_processed_today == 2
+	assert workers_by_name["Eos"].tasks_processed_today == 0
 	assert workers_by_name["Eos"].reliability_score == 1.0
 
 
@@ -173,15 +167,17 @@ async def test_temporal_trends_zero_fill_math():
 
 
 @pytest.mark.asyncio
-async def test_hotspot_density_fallback_math():
-	db = AsyncMock()
-	db.execute.side_effect = [
-		FakeScalarResult(2),
-		FakeScalarResult(3),
-		Exception("PostGIS unavailable"),
-	]
+async def test_hotspot_density_counts_distinct_media():
+    db = AsyncMock()
+    db.execute.return_value = FakeOneResult(SimpleNamespace(hotspot_count=3, media_count=2))
+    result = await get_hotspot_density(db, "user-1")
+    assert result.high_confidence_media_count == 2
+    assert result.hotspot_count == 3
 
-	result = await get_hotspot_density(db, "user-1")
 
-	assert result.high_confidence_media_count == 5
-	assert result.hotspot_count == 5
+@pytest.mark.asyncio
+async def test_hotspot_density_propagates_database_errors():
+    db = AsyncMock()
+    db.execute.side_effect = RuntimeError("PostGIS unavailable")
+    with pytest.raises(RuntimeError, match="PostGIS unavailable"):
+        await get_hotspot_density(db, "user-1")

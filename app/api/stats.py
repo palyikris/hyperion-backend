@@ -1,5 +1,3 @@
-import asyncio
-
 from fastapi import APIRouter, Depends, Query, status
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -249,7 +247,7 @@ async def get_stats_summary(
 
     Performance Notes:
         - All queries are user-scoped (no cross-user data leakage)
-        - Queries run in parallel via asyncio.gather for performance
+        - Queries share the request session and execute sequentially
         - Heavy aggregations benefit from database indexes on:
           - Media.uploader_id
           - Media.status
@@ -265,26 +263,18 @@ async def get_stats_summary(
         return JSONResponse(content=cached_response)
 
     # ------------------------------------------------------------------
-    # FETCH ALL KPIs IN PARALLEL
+    # FETCH ALL KPIs
     # ------------------------------------------------------------------
     user_id = current_user.id
 
-    # Run all KPI queries concurrently for improved performance
-    (
-        trash_composition,        # KPI 1: Trash Composition
-        environmental_footprint,  # KPI 2: Environmental Footprint
-        ai_fleet_efficiency,      # KPI 3: AI Fleet Efficiency
-        temporal_trends,          # KPI 4: Temporal Trends
-        mean_time_to_process,     # KPI 5: Mean Time to Process
-        hotspot_density,          # KPI 6: Hotspot Density
-    ) = await asyncio.gather(
-        get_trash_composition(db, user_id),
-        get_environmental_footprint(db, user_id),
-        get_ai_fleet_efficiency(db, user_id),
-        get_temporal_trends(db, user_id, days),
-        get_mean_time_to_process(db, user_id),
-        get_hotspot_density(db, user_id),
-    )
+    # AsyncSession owns one transaction/connection and cannot execute queries
+    # concurrently. Reuse the request session sequentially for all KPIs.
+    trash_composition = await get_trash_composition(db, user_id)
+    environmental_footprint = await get_environmental_footprint(db, user_id)
+    ai_fleet_efficiency = await get_ai_fleet_efficiency(db, user_id)
+    temporal_trends = await get_temporal_trends(db, user_id, days)
+    mean_time_to_process = await get_mean_time_to_process(db, user_id)
+    hotspot_density = await get_hotspot_density(db, user_id)
 
     # ------------------------------------------------------------------
     # BUILD RESPONSE
@@ -497,7 +487,7 @@ async def get_statistics_pdf_report(
         6. Hotspot Density: High-confidence detection zones
 
     Data Aggregation:
-        - Fetches all KPI data in parallel for performance
+        - Fetches all KPI data sequentially on the request session
         - Caches available statistics when possible
         - User-scoped (no cross-user data leakage)
 
@@ -521,29 +511,20 @@ async def get_statistics_pdf_report(
 
     Performance Notes:
         - Generates PDF in memory (no disk I/O on server)
-        - Parallel query execution for KPI data fetching
+        - Sequential query execution on the request session
         - Supports large datasets efficiently
     """
     # ------------------------------------------------------------------
-    # FETCH ALL KPIs IN PARALLEL (same as summary endpoint)
+    # FETCH ALL KPIs (same as summary endpoint)
     # ------------------------------------------------------------------
     user_id = current_user.id
 
-    (
-        trash_composition,  # KPI 1
-        environmental_footprint,  # KPI 2
-        ai_fleet_efficiency,  # KPI 3
-        temporal_trends,  # KPI 4
-        mean_time_to_process,  # KPI 5
-        hotspot_density,  # KPI 6
-    ) = await asyncio.gather(
-        get_trash_composition(db, user_id),
-        get_environmental_footprint(db, user_id),
-        get_ai_fleet_efficiency(db, user_id),
-        get_temporal_trends(db, user_id, days),
-        get_mean_time_to_process(db, user_id),
-        get_hotspot_density(db, user_id),
-    )
+    trash_composition = await get_trash_composition(db, user_id)
+    environmental_footprint = await get_environmental_footprint(db, user_id)
+    ai_fleet_efficiency = await get_ai_fleet_efficiency(db, user_id)
+    temporal_trends = await get_temporal_trends(db, user_id, days)
+    mean_time_to_process = await get_mean_time_to_process(db, user_id)
+    hotspot_density = await get_hotspot_density(db, user_id)
 
     # ------------------------------------------------------------------
     # BUILD STATISTICS DATA DICTIONARY

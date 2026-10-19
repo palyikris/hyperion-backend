@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, case, and_, desc, or_
+from sqlalchemy import select, func, case, and_, desc, or_, union_all
 from sqlalchemy.orm import selectinload
 from geoalchemy2.functions import (
     ST_Intersects,
@@ -15,7 +15,8 @@ from time import monotonic
 
 from app.database import get_db
 from app.api.deps import get_current_user
-from app.models.db.Media import Media
+from app.models.db.Media import Media, MediaType
+from app.models.upload.MediaStatus import MediaStatus
 from app.models.db.VideoDetection import VideoDetection
 from app.models.db.MediaLog import MediaLog
 from app.models.db.Detection import Detection
@@ -81,7 +82,7 @@ async def get_map_data(
 
     if min_confidence is not None and min_confidence > 0:
         image_query = image_query.where(Media.confidence >= min_confidence)
-        video_query = video_query.where(VideoDetection.confidence >= min_confidence)
+        video_query = video_query.where(VideoDetection.confidence >= min_confidence / 100)
 
     image_result = await db.execute(image_query)
     image_records = image_result.scalars().all()
@@ -192,53 +193,56 @@ async def get_map_stats(
     if cached and now - cached[0] <= STATS_CACHE_TTL_SECONDS:
         return cached[1]
 
-    # Use ST_SnapToGrid for efficient grid cell bucketing with PostGIS
-    # This snaps each point to a grid and extracts the cell coordinates
-    snapped_point = ST_SnapToGrid(Media.location, resolution)
-    cell_lat_expr = ST_Y(snapped_point).label("cell_lat")
-    cell_lng_expr = ST_X(snapped_point).label("cell_lng")
-    confidence_expr = Media.confidence
-
-    # Create bounding box for spatial filtering using ST_MakeEnvelope
     bbox = ST_MakeEnvelope(min_lng, min_lat, max_lng, max_lat, 4326)
-
-    # Base filters shared across all map stats queries so every metric uses the
-    # same uploader + bounded geographic window.
-    media_filters = and_(
+    image_filters = and_(
         Media.uploader_id == current_user.id,
+        Media.status == MediaStatus.READY,
+        Media.media_type == MediaType.IMAGE,
         Media.location.isnot(None),
         or_(Media.has_trash.is_(True), Media.detections.any()),
         ST_Intersects(Media.location, bbox),
     )
-
-    # Per-cell aggregate over Media:
-    # - total_reports: number of media points in the cell
-    # - avg_confidence: mean confidence value (missing confidence treated as 0)
+    video_filters = and_(
+        Media.uploader_id == current_user.id,
+        Media.status == MediaStatus.READY,
+        Media.media_type == MediaType.VIDEO,
+        VideoDetection.location.isnot(None),
+        ST_Intersects(VideoDetection.location, bbox),
+    )
+    # Each image is one map report; each video detection is one located report.
+    # A video parent is excluded so its detections are not counted twice.
+    image_confidence = select(func.max(Detection.confidence)).where(
+        Detection.media_id == Media.id
+    ).correlate(Media).scalar_subquery()
+    points = union_all(
+        select(Media.id.label("report_id"), Media.location.label("location"),
+               func.coalesce(image_confidence * 100, Media.confidence).label("confidence"))
+        .where(image_filters),
+        select(VideoDetection.id, VideoDetection.location, VideoDetection.confidence * 100)
+        .join(Media, VideoDetection.media_id == Media.id).where(video_filters),
+    ).subquery()
+    snapped_point = ST_SnapToGrid(points.c.location, resolution)
+    cell_lat_expr = ST_Y(snapped_point).label("cell_lat")
+    cell_lng_expr = ST_X(snapped_point).label("cell_lng")
     media_agg_subq = (
-        select(
-            cell_lat_expr,
-            cell_lng_expr,
-            func.count(Media.id).label("total_reports"),
-            func.avg(func.coalesce(confidence_expr, 0.0)).label("avg_confidence"),
-        )
-        .where(media_filters)
+        select(cell_lat_expr, cell_lng_expr,
+               func.count().label("total_reports"),
+               func.avg(func.coalesce(points.c.confidence, 0.0)).label("avg_confidence"))
         .group_by(cell_lat_expr, cell_lng_expr)
         .subquery()
     )
-
-    # Count detections by label for each cell. This is used to determine a single
-    # dominant label per cell.
+    labels = union_all(
+        select(Media.location.label("location"), Detection.label.label("label"))
+        .join(Detection, Detection.media_id == Media.id).where(image_filters),
+        select(VideoDetection.location, VideoDetection.label)
+        .join(Media, VideoDetection.media_id == Media.id).where(video_filters),
+    ).subquery()
+    label_point = ST_SnapToGrid(labels.c.location, resolution)
+    label_lat, label_lng = ST_Y(label_point), ST_X(label_point)
     label_counts_subq = (
-        select(
-            cell_lat_expr,
-            cell_lng_expr,
-            Detection.label.label("label"),
-            func.count(Detection.id).label("label_count"),
-        )
-        .select_from(Media)
-        .join(Detection, Detection.media_id == Media.id)
-        .where(media_filters)
-        .group_by(cell_lat_expr, cell_lng_expr, Detection.label)
+        select(label_lat.label("cell_lat"), label_lng.label("cell_lng"),
+               labels.c.label, func.count().label("label_count"))
+        .group_by(label_lat, label_lng, labels.c.label)
         .subquery()
     )
 

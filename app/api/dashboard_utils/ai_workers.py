@@ -8,13 +8,14 @@ import asyncio
 import uuid
 import time
 
-from datetime import datetime, timezone, date
+from datetime import datetime, timezone
 
 router = APIRouter()
 
 WORKER_ONLINE_THRESHOLD_SECONDS = 120
 
-from sqlalchemy import select
+from sqlalchemy import select, func
+from app.api.stats_utils.completed_media import completed_media
 from app.database import get_db  #
 from app.models.db.AIWorker import AIWorkerState
 from app.models.db.Media import Media
@@ -34,6 +35,19 @@ async def get_worker_status(
 ):
     result = await db.execute(select(AIWorkerState))
     worker_records = result.scalars().all()
+
+    now = datetime.now(timezone.utc)
+    today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    completions = completed_media()
+    daily_result = await db.execute(
+        select(Media.assigned_worker, func.count().label("completed"))
+        .join(completions, completions.c.media_id == Media.id)
+        .where(Media.status == MediaStatus.READY,
+               completions.c.completed_at >= today,
+               completions.c.completed_at <= now)
+        .group_by(Media.assigned_worker)
+    )
+    daily_counts = {row.assigned_worker: row.completed for row in daily_result.all()}
 
     nodes = []
     active_count = 0
@@ -68,7 +82,7 @@ async def get_worker_status(
             {
                 "name": worker.name,
                 "status": status_label,
-                "tasks_processed_today": worker.tasks_processed_today,
+                "tasks_processed_today": daily_counts.get(worker.name, 0),
                 "current_task_id": str(current_task.id) if current_task else None,
                 "current_task_status": (
                     current_task.status.value if current_task else None

@@ -25,12 +25,12 @@ class TestStatsEndpoints:
             assert data["items"][0]["label"] == "plastic"
             assert mock_get.called
 
-    async def test_stats_summary_parallel_execution(self, auth_client):
-        """Test that the /api/stats/summary endpoint calls all KPI utilities in parallel."""
+    async def test_stats_summary_fetches_all_kpis(self, auth_client):
+        """Test that the /api/stats/summary endpoint calls all KPI utilities."""
       
         client = auth_client["client"]
 
-        # Patch all 6 KPI utilities to verify parallel execution
+        # Patch all 6 KPI utilities to verify aggregation
         with patch(
             "app.api.stats.get_trash_composition", new_callable=AsyncMock
         ) as m1, patch(

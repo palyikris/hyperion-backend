@@ -5,44 +5,57 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sess
 from sqlalchemy.pool import NullPool
 from sqlalchemy import text
 
-from main import app
-from app.database import get_db, Base
-
 import os
 
 TEST_DATABASE_URL = os.getenv(
-    "DATABASE_URL",
+    "TEST_DATABASE_URL",
     "postgresql+asyncpg://test_user:test_pass@localhost:5432/hyperion_test",
 )
+# Never point tests (including application dependencies) at the configured app DB.
+os.environ["DATABASE_URL"] = TEST_DATABASE_URL
+os.environ.setdefault("SECRET_KEY", "hyperion-test-secret")
 
-@pytest_asyncio.fixture(scope="session", autouse=True)
+from app.database import get_db, Base
+
+@pytest_asyncio.fixture(scope="session")
 async def setup_database():
-    """Runs once per test session to create and drop tables."""
+    """Create tables in a unique schema on an explicitly selected test database."""
+    if not os.getenv("TEST_DATABASE_URL"):
+        pytest.skip("Set TEST_DATABASE_URL to run PostgreSQL/PostGIS integration tests")
+    from main import app  # Register all models without starting background workers.
+    from sqlalchemy.engine import make_url
+    import uuid
 
-    # Create a temporary engine just for setup
+    if not (make_url(TEST_DATABASE_URL).database or "").endswith("_test"):
+        raise ValueError("TEST_DATABASE_URL must name a disposable database ending in _test")
+    schema = "hyperion_test_" + uuid.uuid4().hex
+
     engine = create_async_engine(TEST_DATABASE_URL, poolclass=NullPool)
     async with engine.begin() as conn:
-        await conn.execute(text("DROP TABLE IF EXISTS alembic_version;"))
-
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS postgis;"))
-        await conn.run_sync(Base.metadata.drop_all)
+        await conn.execute(text(f'CREATE SCHEMA "{schema}"'))
+        await conn.execute(text(f'SET search_path TO "{schema}", public'))
         await conn.run_sync(Base.metadata.create_all)
     await engine.dispose()
 
-    yield
+    yield schema
 
     # Create a temporary engine just for teardown
     engine = create_async_engine(TEST_DATABASE_URL, poolclass=NullPool)
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
+        await conn.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
     await engine.dispose()
 
 
 @pytest_asyncio.fixture
-async def db_session():
+async def db_session(setup_database):
     """Provides a fresh database session for a single test."""
     # Creating the engine inside the fixture ensures it binds to the correct event loop!
-    engine = create_async_engine(TEST_DATABASE_URL, poolclass=NullPool)
+    engine = create_async_engine(
+        TEST_DATABASE_URL,
+        poolclass=NullPool,
+        connect_args={"server_settings": {"search_path": f"{setup_database},public"}},
+    )
     TestSessionLocal = async_sessionmaker(
         engine, class_=AsyncSession, expire_on_commit=False
     )
@@ -55,8 +68,15 @@ async def db_session():
 
 
 @pytest_asyncio.fixture
-async def client(db_session):
+async def client(db_session, monkeypatch):
     """Creates an async HTTP client and overrides the database dependency."""
+
+    from main import app
+    from app.api.dashboard_utils import ux
+
+    monkeypatch.setattr(ux, "AsyncSessionLocal", async_sessionmaker(
+        db_session.bind, class_=AsyncSession, expire_on_commit=False
+    ))
 
     async def override_get_db():
         yield db_session

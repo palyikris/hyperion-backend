@@ -3,8 +3,6 @@ from sqlalchemy.dialects.postgresql import insert
 from app.database import AsyncSessionLocal
 from app.models.db.AIWorker import AIWorkerState
 from datetime import datetime, timezone
-from app.api.dashboard_utils.utils.worker_process import ai_worker_process
-from app.api.dashboard_utils.utils.reaper_process import ai_reaper_process
 import asyncio
 
 TITAN_FLEET = [
@@ -23,6 +21,9 @@ TITAN_FLEET = [
 
 async def initialize_worker_fleet():
     """Ensures all workers exist in the DB without overwriting current progress."""
+    from app.api.dashboard_utils.utils.worker_process import ai_worker_process
+    from app.api.dashboard_utils.utils.reaper_process import ai_reaper_process
+
     async with AsyncSessionLocal() as session:
         async with session.begin():
             for name in TITAN_FLEET:

@@ -8,7 +8,7 @@ from app.core.security import SECRET_KEY, ALGORITHM
 from app.models.db.User import User
 
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from collections import deque
 from fastapi import Request
@@ -32,40 +32,34 @@ ACTIVE_USER_TTL_SECONDS = 300
 TREND_UPDATE_INTERVAL_SECONDS = 60
 
 
-def update_metrics():
+def update_metrics(*, sample_trend: bool = True):
     """Update trend history and daily metrics."""
     global last_trend_update, current_day, daily_user_sessions
     current_time = time.time()
     today = datetime.now(timezone.utc).date()
 
-    # Update active user trend every 60 seconds (more responsive for monitoring)
-    if current_time - last_trend_update > TREND_UPDATE_INTERVAL_SECONDS:
-        active_trend_history.append(len(active_users))
-        last_trend_update = current_time
+    expired = [user_id for user_id, last_seen in active_users.items()
+               if current_time - last_seen >= ACTIVE_USER_TTL_SECONDS]
+    for user_id in expired:
+        del active_users[user_id]
 
-    # Reset daily counter if day changed
-    if today != current_day:
+    # Close every elapsed day before counting the first request of a new day.
+    while current_day < today:
         daily_history.append(len(daily_user_sessions))
         daily_user_sessions = {}
-        current_day = today
+        current_day += timedelta(days=1)
+
+    # Update active user trend every 60 seconds (more responsive for monitoring)
+    if sample_trend and current_time - last_trend_update >= TREND_UPDATE_INTERVAL_SECONDS:
+        active_trend_history.append(len(active_users))
+        last_trend_update = current_time
 
 
 def update_active_users(user_id: str):
     global daily_user_sessions
+    update_metrics(sample_trend=False)
     active_users[user_id] = time.time()
     daily_user_sessions[user_id] = True  # Track unique users today
-
-    # cleanup users who havent made a request in 5 minutes
-    current_time = time.time()
-    expired = [
-        ip
-        for ip, last_seen in active_users.items()
-        if current_time - last_seen > ACTIVE_USER_TTL_SECONDS
-    ]
-    for ip in expired:
-        del active_users[ip]
-
-    # Update metrics
     update_metrics()
 
 
@@ -88,7 +82,7 @@ async def get_user_id_from_request(request: Request) -> Optional[str]:
 
 
 async def track_ux_metrics(request: Request, call_next):
-    start_time = time.time()
+    start_time = time.perf_counter()
 
     user_id = await get_user_id_from_request(request)
     if user_id:
@@ -96,7 +90,7 @@ async def track_ux_metrics(request: Request, call_next):
 
     response = await call_next(request)
 
-    duration_ms = (time.time() - start_time) * 1000
+    duration_ms = (time.perf_counter() - start_time) * 1000
     response_times.append(duration_ms)
 
     return response
@@ -121,7 +115,7 @@ async def user_experience(current_user=Depends(get_current_user)):
             "avg_response_time": (
                 sum(response_times) / len(response_times) if response_times else 0
             ),
-            "daily_activity": list(daily_history),
+            "daily_activity": list(daily_history)[-6:] + [len(daily_user_sessions)],
             "last_updated": datetime.now(timezone.utc).isoformat(),
         }
     )

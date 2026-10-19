@@ -324,6 +324,9 @@ async def patch_media(
             # Keep the summary flag in sync with the manually validated
             # detection list so map colors and trash filters agree.
             media.has_trash = bool(media.detections)
+            media.confidence = round(max(
+                (detection.confidence for detection in media.detections), default=0.0
+            ) * 100, 2)
 
     await db.commit()
 

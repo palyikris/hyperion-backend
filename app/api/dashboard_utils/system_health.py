@@ -12,7 +12,7 @@ from app.models.dashboard.system_health import SystemHealthResponse
 
 router = APIRouter()
 
-START_TIME = time.time()
+START_TIME = time.monotonic()
 # In-memory load history is process-local. Multi-worker deployments should use a
 # shared store if they need a fleet-wide dashboard view.
 # Initialize with zeros so the chart does not look broken on first load.
@@ -37,7 +37,10 @@ def get_container_memory_percent():
                 if limit_str == "max":
                     return psutil.virtual_memory().percent
                 limit = int(limit_str)
-            return (used / limit) * 100.0
+            if limit <= 0:
+                return psutil.virtual_memory().percent
+            limit = min(limit, psutil.virtual_memory().total)
+            return min(100.0, (used / limit) * 100.0)
 
         # trying cgroup v1
         elif os.path.exists("/sys/fs/cgroup/memory/memory.usage_in_bytes"):
@@ -46,9 +49,10 @@ def get_container_memory_percent():
             with open("/sys/fs/cgroup/memory/memory.limit_in_bytes") as f:
                 limit = int(f.read().strip())
             # very high -> not actual limit
-            if limit > 1e15:
+            if limit <= 0 or limit > 1e15:
                 return psutil.virtual_memory().percent
-            return (used / limit) * 100.0
+            limit = min(limit, psutil.virtual_memory().total)
+            return min(100.0, (used / limit) * 100.0)
     except Exception:
         pass
 
@@ -56,74 +60,66 @@ def get_container_memory_percent():
     return psutil.virtual_memory().percent
 
 
-def get_container_cpu_percent():
-    """
-    Read CPU usage from cgroup files (container-aware).
-    Falls back to 0 if not in a container (avoids unreliable psutil).
-    """
-    global _last_cpu_usage, _last_cpu_time
-
+def _cpu_capacity():
+    """CPU cores available to the process, bounded by the cgroup CPU quota."""
+    capacity = float(os.cpu_count() or 1)
+    if hasattr(os, "sched_getaffinity"):
+        capacity = min(capacity, float(len(os.sched_getaffinity(0))))
     try:
-        # Try cgroup v2
-        if os.path.exists("/sys/fs/cgroup/cpu.stat"):
-            with open("/sys/fs/cgroup/cpu.stat") as f:
-                cpu_stat_content = f.read()
-                for line in cpu_stat_content.strip().split("\n"):
-                    if line.startswith("usage_usec"):
-                        current_usage = int(line.split()[1])
-                        current_time = time.time()
-
-                        if _last_cpu_usage is not None and _last_cpu_time is not None:
-                            usage_diff = current_usage - _last_cpu_usage
-                            time_diff = current_time - _last_cpu_time
-                            # converting microseconds to percentage
-                            cpu_percent = (usage_diff / (time_diff * 1_000_000)) * 100.0
-                            _last_cpu_usage = current_usage
-                            _last_cpu_time = current_time
-                            return min(100.0, max(0.0, cpu_percent))
-                        else:
-                            # First call - initialize and return 0 (no previous measurement to compare)
-                            _last_cpu_usage = current_usage
-                            _last_cpu_time = current_time
-                            return 0.0
-
-        # Try cgroup v1
-        elif os.path.exists("/sys/fs/cgroup/cpuacct/cpuacct.usage"):
-            with open("/sys/fs/cgroup/cpuacct/cpuacct.usage") as f:
-                current_usage = int(f.read().strip())
-                current_time = time.time()
-
-                if _last_cpu_usage is not None and _last_cpu_time is not None:
-                    usage_diff = current_usage - _last_cpu_usage
-                    time_diff = current_time - _last_cpu_time
-                    # converting nanoseconds to percentage
-                    cpu_percent = (usage_diff / (time_diff * 1_000_000_000)) * 100.0
-                    _last_cpu_usage = current_usage
-                    _last_cpu_time = current_time
-                    return min(100.0, max(0.0, cpu_percent))
-                else:
-                    # First call - initialize and return 0 (no previous measurement to compare)
-                    _last_cpu_usage = current_usage
-                    _last_cpu_time = current_time
-                    return 0.0
-    except Exception:
+        if os.path.exists("/sys/fs/cgroup/cpu.max"):
+            with open("/sys/fs/cgroup/cpu.max") as stream:
+                quota, period = stream.read().split()
+            if quota != "max" and int(period) > 0:
+                capacity = min(capacity, int(quota) / int(period))
+        elif os.path.exists("/sys/fs/cgroup/cpu/cpu.cfs_quota_us"):
+            with open("/sys/fs/cgroup/cpu/cpu.cfs_quota_us") as stream:
+                quota = int(stream.read())
+            with open("/sys/fs/cgroup/cpu/cpu.cfs_period_us") as stream:
+                period = int(stream.read())
+            if quota > 0 and period > 0:
+                capacity = min(capacity, quota / period)
+    except (OSError, ValueError):
         pass
+    return capacity if capacity > 0 else 1.0
 
-    # Fallback: return 0 if no cgroup files available (avoid unreliable psutil in containers)
-    return 0.0
+
+def get_container_cpu_percent():
+    """Cgroup CPU usage as a percentage of available CPU capacity."""
+    global _last_cpu_usage, _last_cpu_time
+    try:
+        if os.path.exists("/sys/fs/cgroup/cpu.stat"):
+            with open("/sys/fs/cgroup/cpu.stat") as stream:
+                values = dict(line.split() for line in stream if line.strip())
+            usage = int(values["usage_usec"]) / 1_000_000
+        elif os.path.exists("/sys/fs/cgroup/cpuacct/cpuacct.usage"):
+            with open("/sys/fs/cgroup/cpuacct/cpuacct.usage") as stream:
+                usage = int(stream.read()) / 1_000_000_000
+        else:
+            return float(psutil.cpu_percent(interval=None))
+        now = time.monotonic()
+        previous_usage, previous_time = _last_cpu_usage, _last_cpu_time
+        _last_cpu_usage, _last_cpu_time = usage, now
+        if previous_usage is None or previous_time is None or now <= previous_time:
+            return 0.0
+        usage_delta = max(0.0, usage - previous_usage)
+        percent = usage_delta / (now - previous_time) / _cpu_capacity() * 100
+        return min(100.0, max(0.0, percent))
+    except (OSError, ValueError, KeyError):
+        return float(psutil.cpu_percent(interval=None))
 
 
 def get_uptime_sla_percent():
-    """Calculates uptime as a percentage of a 30-day rolling window (SLA-style)."""
-    uptime_seconds = time.time() - START_TIME
-    thirty_days_in_seconds = 30 * 24 * 60 * 60  # 2,592,000 seconds
-    uptime_percent = min(100.0, (uptime_seconds / thirty_days_in_seconds) * 100.0)
-    return round(uptime_percent, 2)
+    """Availability is unknown without persisted uptime/downtime observations.
+
+    Process age divided by 30 days is not an SLA. Keep the optional API field
+    unset until an availability history exists; process age is reported separately.
+    """
+    return None
 
 
 def get_formatted_uptime():
     """Returns human-readable uptime string (e.g., '3d 5h 22m')."""
-    uptime_seconds = int(time.time() - START_TIME)
+    uptime_seconds = max(0, int(time.monotonic() - START_TIME))
     days, remainder = divmod(uptime_seconds, 86400)
     hours, remainder = divmod(remainder, 3600)
     minutes, _ = divmod(remainder, 60)

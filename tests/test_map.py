@@ -42,14 +42,16 @@ async def test_get_map_stats_aggregation(auth_client, db_session):
         uploader_id=user.id,
         location="POINT(20.001 47.001)",
         has_trash=True,
-        confidence=0.9,
+        status=MediaStatus.READY,
+        confidence=90,
     )
     m2 = Media(
         id=uuid.uuid4(),
         uploader_id=user.id,
         location="POINT(20.002 47.002)",
         has_trash=True,
-        confidence=0.8,
+        status=MediaStatus.READY,
+        confidence=80,
     )
     db_session.add_all([m1, m2])
     await db_session.commit()
@@ -69,7 +71,7 @@ async def test_get_map_stats_aggregation(auth_client, db_session):
     stats = response.json()
     assert stats["total"] >= 1
     assert stats["items"][0]["count"] == 2
-    assert stats["items"][0]["confidence"] == 0.85  # Avg of 0.9 and 0.8
+    assert stats["items"][0]["confidence"] == 85  # Media confidence uses percentages.
 
 import uuid
 

@@ -3,7 +3,7 @@ HTML-based PDF report generator using Jinja2 templates and xhtml2pdf.
 """
 
 from io import BytesIO
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 import base64
 from functools import lru_cache
@@ -82,21 +82,25 @@ def _prepare_template_data(stats_data: dict[str, Any], language: str) -> dict:
     days_window = temporal_data.get("days_window", 7)
 
     temporal_items = []
-    for trend in trends[-7:]:  # Last 7 items
+    for trend in trends:
         temporal_items.append({
             "date": trend.get("date", "N/A"),
             "count": trend.get("count", 0),
         })
 
     return {
-        "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
         "days_window": days_window,
         "logo_src": _get_logo_src(),
+        "font_regular_path": os.path.join(TEMPLATE_DIR, "fonts", "NotoSans-Regular.ttf").replace("\\", "/"),
+        "font_bold_path": os.path.join(TEMPLATE_DIR, "fonts", "NotoSans-Bold.ttf").replace("\\", "/"),
         "trash_composition_items": trash_items,
         "total_detections": total,
         "total_area_sqm": f"{float(total_area_sqm):,.2f}",
         "hotspot_count": f"{float(hotspot_count):,.0f}",
         "temporal_trends_items": temporal_items,
+        "fleet": stats_data.get("ai_fleet_efficiency", {}),
+        "processing": stats_data.get("mean_time_to_process", {}),
     }
 
 
@@ -125,7 +129,8 @@ def _html_to_pdf(html_content: str) -> BytesIO:
         src=html_content,
         dest=pdf_bytes,
     )
-    
+    if pisa_status.err:
+        raise ValueError("Statistics PDF rendering failed")
     
     # Reset position to beginning
     pdf_bytes.seek(0)
