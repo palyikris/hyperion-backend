@@ -4,7 +4,6 @@ from app.api.dashboard_utils.utils.media_utils import (
     build_metadata_update,
     detect_duplicate,
     is_image_media,
-    generate_fake_detections,
 )
 from app.api.upload_utils.conn_manager import manager
 from app.models.db.Media import Media
@@ -14,10 +13,11 @@ from app.models.db.AIWorker import AIWorkerState
 from app.database import AsyncSessionLocal
 from sqlalchemy import update, select
 from .hf_metadata import extract_metadata_from_hf
-import asyncio
+import logging
 from app.api.ai_client import get_real_detections
 
 DUPLICATE_DISTANCE_METERS = 10
+logger = logging.getLogger(__name__)
 
 async def process_image_media(media_task, name, uploader_id):
     """
@@ -109,10 +109,8 @@ async def process_image_media(media_task, name, uploader_id):
         res = await session.execute(select(Media).where(Media.id == media_task_id))
         task = res.scalar_one()
 
-        detections = []
         if is_image_media(task):
-            detections = await get_real_detections(task.hf_path)
-            print(f"Detections for media {media_task_id}: {detections}")
+            image_path = task.hf_path
         else:
             await fail_media(
                 session,
@@ -123,6 +121,14 @@ async def process_image_media(media_task, name, uploader_id):
                 "Unsupported media type for AI processing",
             )
             return False
+
+    # Inference (including retries) can outlive an idle DB connection. Open the
+    # persistence transaction only after the model has returned its result.
+    detections = await get_real_detections(image_path)
+
+    async with AsyncSessionLocal() as session:
+        res = await session.execute(select(Media).where(Media.id == media_task_id))
+        task = res.scalar_one()
 
         if detections:
             orig_w = task.initial_metadata.get("width")
@@ -148,7 +154,7 @@ async def process_image_media(media_task, name, uploader_id):
 
             session.add_all(detection_instances)
 
-            task_meta = task.technical_metadata or {}
+            task_meta = dict(task.technical_metadata or {})
             max_confidence = max(d["confidence"] for d in detections)
 
             task.has_trash = True
@@ -158,7 +164,7 @@ async def process_image_media(media_task, name, uploader_id):
             task_meta["detections_count"] = len(detections)
             task.technical_metadata = task_meta
         else:
-            task_meta = task.technical_metadata or {}
+            task_meta = dict(task.technical_metadata or {})
             task.has_trash = False
             task.confidence = 0.0
             task_meta["has_trash"] = False
@@ -178,6 +184,7 @@ async def process_image_media(media_task, name, uploader_id):
         )
         add_status_log(session, task.id, MediaStatus.READY, name)
         await session.commit()
+        logger.info("Saved %s detections for image %s", len(detections), media_task_id)
 
     await manager.send_status(
         user_id=str(uploader_id),

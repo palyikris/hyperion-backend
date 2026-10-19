@@ -2,6 +2,7 @@ import cv2
 import os
 import tempfile
 import asyncio
+import math
 from datetime import datetime, timezone
 from sqlalchemy import select, update
 from app.database import AsyncSessionLocal
@@ -46,6 +47,9 @@ async def process_video_media(
         else ""
     )
     local_video_path = None
+    cap = None
+    temporary_frames = set()
+    delete_source_video = False
     HF_REPO_ID = os.getenv("HF_REPO_ID")
     HF_TOKEN = os.getenv("HF_TOKEN")
 
@@ -112,6 +116,7 @@ async def process_video_media(
                         )
                     )
                     await session.commit()
+                    delete_source_video = True
                     await manager.send_status(
                         user_id,
                         str(media_id),
@@ -179,7 +184,9 @@ async def process_video_media(
 
             fps, total_frames = await asyncio.to_thread(get_fps_and_frames, cap)
 
-            frame_step = int(fps * IMAGE_CHECK_INTERVAL_SECONDS)
+            if not math.isfinite(fps) or fps <= 0 or total_frames <= 0:
+                raise ValueError("Video has an invalid frame rate or frame count.")
+            frame_step = max(1, int(fps * IMAGE_CHECK_INTERVAL_SECONDS))
             current_frame_idx = 0
 
             all_detections_for_db = []
@@ -197,7 +204,9 @@ async def process_video_media(
                     with tempfile.NamedTemporaryFile(
                         suffix=".jpg", delete=False
                     ) as tmp:
-                        cv2.imwrite(tmp.name, f)
+                        if not cv2.imwrite(tmp.name, f):
+                            os.remove(tmp.name)
+                            raise RuntimeError("Could not save video frame for inference.")
                         return tmp.name
 
                 ret, frame = await asyncio.to_thread(read_frame, cap, current_frame_idx)
@@ -205,6 +214,7 @@ async def process_video_media(
                     break
 
                 tmp_frame_path = await asyncio.to_thread(save_temp_frame, frame)
+                temporary_frames.add(tmp_frame_path)
 
                 timestamp_sec = current_frame_idx / fps
 
@@ -216,43 +226,30 @@ async def process_video_media(
                     f"Frame {current_frame_idx} at {timestamp_sec}s: GPS matched as {frame_lat}, {frame_lng}"
                 )
 
+                detections = []
                 if frame_lat is not None and frame_lng is not None:
 
                     detections = await get_real_detections(tmp_frame_path)
 
-                    if os.path.exists(tmp_frame_path):
-                        os.remove(tmp_frame_path)
+                    if detections:
+                        # The model sees a still image; GPS and time come from the video.
+                        filename = f"frame_{timestamp_sec}.jpg"
+                        hf_file_path = (
+                            f"media/{user_id}/{date_str}/{media_id}_{filename}"
+                        )
+                        frames_to_upload.append((tmp_frame_path, hf_file_path))
+                        address = await get_address_from_coords(frame_lat, frame_lng)
+                        vid_h, vid_w = frame.shape[:2]
 
                     for det in detections:
 
                         sum_confidence_found += det["confidence"]
-
-                        # save the frame locally to a temp file in thread
-                        def save_frame(frame):
-                            with tempfile.NamedTemporaryFile(
-                                suffix=".jpg", delete=False
-                            ) as tmp_img:
-                                cv2.imwrite(tmp_img.name, frame)
-                                return tmp_img.name
-
-                        tmp_img_path = await asyncio.to_thread(save_frame, frame)
-
-                        filename = f"frame_{det['timestamp_in_video']}.jpg"
-                        hf_file_path = (
-                            f"media/{user_id}/{date_str}/{media_id}_{filename}"
-                        )
-
-                        frames_to_upload.append((tmp_img_path, hf_file_path))
-
-                        address = await get_address_from_coords(det["lat"], det["lng"])
-                        vid_w = cap.get(cv2.CAP_PROP_FRAME_WIDTH)
-                        vid_h = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
                         x1, y1, x2, y2 = det["bbox"]
 
                         db_det = VideoDetection(
                             media_id=media.id,
-                            timestamp_in_video=det["timestamp_in_video"],
-                            label=det["label"],
+                            timestamp_in_video=timestamp_sec,
+                            label="Trash" if det["label"] == "rubbish" else det["label"],
                             confidence=det["confidence"],
                             bbox={
                                 "x": x1 / vid_w,
@@ -263,34 +260,42 @@ async def process_video_media(
                             frame_hf_path=hf_file_path,
                             lat=frame_lat,
                             lng=frame_lng,
-                            location=f"SRID=4326;POINT({det['lng']} {det['lat']})",
+                            location=f"SRID=4326;POINT({frame_lng} {frame_lat})",
                             address=address,
                         )
                         all_detections_for_db.append(db_det)
 
+                if not detections:
+                    os.remove(tmp_frame_path)
+                    temporary_frames.discard(tmp_frame_path)
+
                 current_frame_idx += frame_step
 
             await asyncio.to_thread(lambda c: c.release(), cap)
+            cap = None
 
             if frames_to_upload:
                 upload_success = await upload_video_frames_to_hf(
                     user_id, str(media.id), frames_to_upload
                 )
-                if upload_success:
-                    session.add_all(all_detections_for_db)
-                    media.has_trash = True
-                    media.confidence = round(
-                        sum_confidence_found / len(all_detections_for_db) * 100, 2
-                    )
-                else:
-                    media.has_trash = False
-                    media.confidence = 0.0
-                    logger.error(
-                        f"HF Upload failed for video {media_id}. Detections not saved."
-                    )
+                if not upload_success:
+                    raise RuntimeError("Could not upload video detection evidence frames.")
+                session.add_all(all_detections_for_db)
+                media.has_trash = True
+                media.confidence = round(
+                    sum_confidence_found / len(all_detections_for_db) * 100, 2
+                )
             else:
                 media.has_trash = False
                 media.confidence = 0.0
+
+            tech_meta = dict(media.technical_metadata or {})
+            tech_meta.update(
+                has_trash=media.has_trash,
+                confidence=media.confidence,
+                detections_count=len(all_detections_for_db),
+            )
+            media.technical_metadata = tech_meta
 
             if (
                 media.technical_metadata
@@ -303,10 +308,15 @@ async def process_video_media(
             media.status = MediaStatus.READY
             session.add(create_status_change_log(media.id, MediaStatus.READY))
             await session.commit()
+            delete_source_video = True
+            logger.info(
+                "Saved %s detections for video %s", len(all_detections_for_db), media_id
+            )
 
             await manager.send_status(user_id, str(media_id), "READY")
 
     except Exception as e:
+        logger.exception("Video processing failed for %s", media_id)
         async with AsyncSessionLocal() as session:
             if media_id is not None:
                 media_result = await session.execute(
@@ -316,14 +326,6 @@ async def process_video_media(
                 if media:
                     media.status = MediaStatus.FAILED
                     media.failed_reason = "Internal processing error."
-
-                    if (
-                        media.technical_metadata
-                        and "hf_full_video_path" in media.technical_metadata
-                    ):
-                        tech_meta = media.technical_metadata.copy()
-                        tech_meta["hf_full_video_path"] = None
-                        media.technical_metadata = tech_meta
 
                     session.add(
                         create_status_change_log(
@@ -338,7 +340,20 @@ async def process_video_media(
                         failed_reason="Internal processing error.",
                     )
     finally:
-        if hf_full_video_path:
+        if cap is not None:
+            try:
+                await asyncio.to_thread(cap.release)
+            except Exception:
+                logger.warning("Could not release video capture for %s", media_id, exc_info=True)
+        for frame_path in temporary_frames:
+            try:
+                if os.path.exists(frame_path):
+                    os.remove(frame_path)
+            except OSError:
+                logger.warning("Could not remove temporary video frame %s", frame_path, exc_info=True)
+
+        # Keep the uploaded source available for recovery when inference or saving fails.
+        if delete_source_video and hf_full_video_path:
             await asyncio.to_thread(delete_video_from_hf, hf_full_video_path)
 
         try:
