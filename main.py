@@ -4,6 +4,7 @@ load_dotenv()
 
 from contextlib import asynccontextmanager
 import asyncio
+import logging
 from fastapi import FastAPI
 from app.api import auth
 from app.api import system
@@ -17,54 +18,60 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.dashboard_utils.ux import track_ux_metrics
 from app.api.dashboard_utils.utils.init_workers import initialize_worker_fleet
 from app.api.auth import prune_expired_blacklisted_tokens
-from app.database import AsyncSessionLocal
-import os
+from app.database import AsyncSessionLocal, engine
 
 # Video temp cleaner import
 from app.api.upload_utils.video_temp_cleaner import cleanup_old_video_temp_dirs
+from app.core.csrf import enforce_csrf_origin, get_allowed_frontend_origins
 
 
 BLACKLIST_PRUNE_INTERVAL_SECONDS = 3600
+VIDEO_CLEANUP_INTERVAL_SECONDS = 24 * 3600
+logger = logging.getLogger(__name__)
 
 
 async def _blacklist_pruner() -> None:
     while True:
         await asyncio.sleep(BLACKLIST_PRUNE_INTERVAL_SECONDS)
-        async with AsyncSessionLocal() as session:
-            await prune_expired_blacklisted_tokens(session)
-            await session.commit()
+        try:
+            async with AsyncSessionLocal() as session:
+                await prune_expired_blacklisted_tokens(session)
+                await session.commit()
+        except Exception as exc:
+            logger.warning("Blacklist cleanup failed (%s)", type(exc).__name__)
+
+
+async def _video_temp_cleaner() -> None:
+    while True:
+        try:
+            await asyncio.to_thread(cleanup_old_video_temp_dirs)
+        except Exception as exc:
+            logger.warning("Video cleanup failed (%s)", type(exc).__name__)
+        await asyncio.sleep(VIDEO_CLEANUP_INTERVAL_SECONDS)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    asyncio.create_task(initialize_worker_fleet())
-
-    async with AsyncSessionLocal() as session:
-        await prune_expired_blacklisted_tokens(session)
-        await session.commit()
-
-    prune_task = asyncio.create_task(_blacklist_pruner())
-
-    async def periodic_cleanup():
-        while True:
-            await asyncio.to_thread(cleanup_old_video_temp_dirs)
-            await asyncio.sleep(24 * 3600)  # 24 óra
-
-    video_cleanup_task = asyncio.create_task(periodic_cleanup())
-
+    tasks = []
     try:
+        async with AsyncSessionLocal() as session:
+            await prune_expired_blacklisted_tokens(session)
+            await session.commit()
+        # Initialization must finish before serving traffic. Retain every task
+        # so reloads and shutdown do not leave an unowned worker fleet running.
+        tasks.extend(await initialize_worker_fleet())
+        tasks.append(asyncio.create_task(_blacklist_pruner(), name="blacklist-pruner"))
+        tasks.append(asyncio.create_task(_video_temp_cleaner(), name="video-temp-cleaner"))
+        app.state.background_tasks = tasks
         yield
     finally:
-        prune_task.cancel()
-        video_cleanup_task.cancel()
-        try:
-            await prune_task
-        except asyncio.CancelledError:
-            pass
-        try:
-            await video_cleanup_task
-        except asyncio.CancelledError:
-            pass
+        for task in tasks:
+            task.cancel()
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for result in results:
+            if isinstance(result, Exception):
+                logger.warning("Background task stopped with %s", type(result).__name__)
+        await engine.dispose()
 
 
 app = FastAPI(
@@ -84,15 +91,19 @@ app = FastAPI(
     },
 )
 
-FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[FRONTEND_URL, "http://127.0.0.1:5173", "http://localhost:5173"],
+    allow_origins=get_allowed_frontend_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["Authorization", "Content-Type"],
 )
+
+
+@app.middleware("http")
+async def csrf_origin_middleware(request, call_next):
+    return await enforce_csrf_origin(request, call_next)
+
 
 @app.middleware("http")
 async def middleware(request, call_next):

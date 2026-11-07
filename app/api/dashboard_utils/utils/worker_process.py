@@ -1,5 +1,7 @@
 import asyncio
-from datetime import datetime, timezone, date
+import logging
+from contextlib import suppress
+from datetime import date
 from sqlalchemy import select, update, or_, func, and_
 from sqlalchemy.sql import text
 from geoalchemy2.functions import ST_DWithin, ST_SetSRID, ST_MakePoint
@@ -17,6 +19,8 @@ from .image_processor import process_image_media
 from .video_processor import process_video_media
 from app.api.upload_utils.hf_upload import delete_video_from_hf
 from .hf_metadata import extract_metadata_from_hf
+from .worker_state import maintain_worker_heartbeat, worker_timestamp
+from app.api.ai_client import AIInferenceError
 
 
 WORKER_IDLE_WAIT_SECONDS = 60
@@ -24,6 +28,35 @@ WORKER_RATE_LIMIT_BACKOFF_SECONDS = 300
 WORKER_ERROR_RETRY_SECONDS = 10
 EXTRACTION_RETRY_DELAY_SECONDS = 5
 DUPLICATE_DISTANCE_METERS = 10
+logger = logging.getLogger(__name__)
+
+
+async def fail_interrupted_task(media_id, uploader_id, name: str) -> None:
+    """Close only this worker's unfinished claim during graceful shutdown."""
+    reason = "Processing was interrupted by a server shutdown. Please try again."
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            update(Media)
+            .where(
+                Media.id == media_id,
+                Media.assigned_worker == name,
+                Media.status.in_([MediaStatus.EXTRACTING, MediaStatus.PROCESSING]),
+            )
+            .values(status=MediaStatus.FAILED, failed_reason=reason, assigned_worker=None)
+            .returning(Media.id)
+        )
+        changed_id = result.scalar_one_or_none()
+        if changed_id is None:
+            return
+        session.add(create_status_change_log(
+            media_id=media_id, status=MediaStatus.FAILED,
+            worker_name=name, detail="Processing interrupted by server shutdown",
+        ))
+        await session.commit()
+    await manager.send_status(
+        user_id=str(uploader_id), media_id=str(media_id),
+        status=MediaStatus.FAILED.value, worker=None, failed_reason=reason,
+    )
 
 
 async def ai_worker_process(name: str):
@@ -33,6 +66,7 @@ async def ai_worker_process(name: str):
     while True:
         media_task_id = None
         uploader_id = None
+        heartbeat_task = None
         try:
             if manager.is_hf_rate_limited():
                 async with AsyncSessionLocal() as session:
@@ -40,7 +74,7 @@ async def ai_worker_process(name: str):
                         update(AIWorkerState)
                         .where(AIWorkerState.name == name)
                         .values(
-                            last_ping=datetime.now(timezone.utc),
+                            last_ping=worker_timestamp(),
                             status="Paused (Rate Limited)",
                         )
                     )
@@ -66,7 +100,7 @@ async def ai_worker_process(name: str):
                 await session.execute(
                     update(AIWorkerState)
                     .where(AIWorkerState.name == name)
-                    .values(last_ping=datetime.now(timezone.utc), status="Active")
+                    .values(last_ping=worker_timestamp(), status="Active")
                 )
                 await session.commit()
 
@@ -118,6 +152,11 @@ async def ai_worker_process(name: str):
                     except asyncio.TimeoutError:
                         pass
                 continue
+
+            heartbeat_task = asyncio.create_task(
+                maintain_worker_heartbeat(name),
+                name=f"worker-heartbeat-{name}",
+            )
 
             await manager.send_status(
                 user_id=str(uploader_id),
@@ -206,11 +245,22 @@ async def ai_worker_process(name: str):
                 )
                 continue
 
+        except asyncio.CancelledError:
+            if media_task_id and uploader_id:
+                try:
+                    await fail_interrupted_task(media_task_id, uploader_id, name)
+                except Exception as exc:
+                    logger.warning("Interrupted claim cleanup failed (%s)", type(exc).__name__)
+            raise
         except Exception as e:
             print(f"Worker {name} encountered an error: {e}")
             # Handle AI processing failures
             if media_task_id and uploader_id:
-                processing_failed_reason = "The AI analysis engine failed to process this image. Our team has been notified."
+                processing_failed_reason = (
+                    str(e)
+                    if isinstance(e, AIInferenceError)
+                    else "The AI analysis engine failed to process this media. Please try again."
+                )
                 try:
                     async with AsyncSessionLocal() as session:
                         await session.execute(
@@ -241,3 +291,8 @@ async def ai_worker_process(name: str):
                 except Exception as inner_e:
                     print(f"Worker {name} failed to update failure status: {inner_e}")
             await asyncio.sleep(WORKER_ERROR_RETRY_SECONDS)
+        finally:
+            if heartbeat_task is not None:
+                heartbeat_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await heartbeat_task

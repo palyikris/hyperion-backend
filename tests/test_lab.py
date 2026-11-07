@@ -1,9 +1,12 @@
 import pytest
 import uuid
 from fastapi import status
-from app.models.db.Media import Media
+from sqlalchemy import select
+from app.models.db.Media import Media, MediaType
 from app.models.db.Detection import Detection
-from unittest.mock import patch, AsyncMock
+from app.models.db.MediaLog import MediaLog
+from app.models.db.VideoDetection import VideoDetection
+from unittest.mock import patch
 
 
 @pytest.mark.asyncio
@@ -25,7 +28,7 @@ async def test_patch_media_detection_update(auth_client, db_session):
         media_id=media_id,
         label="plastic",
         confidence=0.5,
-        bbox={"x": 0.0, "y": 0.0, "w": 10.0, "h": 10.0},
+        bbox={"x": 0.0, "y": 0.0, "w": 0.5, "h": 0.5},
         area_sqm=100.0,
     )
     db_session.add(media)
@@ -40,7 +43,7 @@ async def test_patch_media_detection_update(auth_client, db_session):
         "detections": [
             {
                 "label": "plastic",
-                "bbox": {"x": 0.0, "y": 0.0, "w": 10.0, "h": 10.0},
+                "bbox": {"x": 0.0, "y": 0.0, "w": 0.5, "h": 0.5},
                 "area_sqm": 200.0,
                 "confidence": 0.9,
             }
@@ -96,3 +99,127 @@ async def test_get_media_security(auth_client, db_session):
 
     response = await client.get(f"/api/lab/image/{other_user_media.id}")
     assert response.status_code == status.HTTP_404_NOT_FOUND
+
+
+@pytest.mark.asyncio
+async def test_patch_video_detection_updates_and_adds_detections(
+    auth_client, db_session
+):
+    client = auth_client["client"]
+    user = auth_client["user"]
+
+    media = Media(
+        id=uuid.uuid4(),
+        uploader_id=user.id,
+        media_type=MediaType.VIDEO,
+    )
+    video_detection = VideoDetection(
+        id=uuid.uuid4(),
+        media_id=media.id,
+        lat=47.0,
+        lng=20.0,
+        altitude=120.0,
+        location="SRID=4326;POINT(20.0 47.0)",
+        address="Original address",
+        label="plastic",
+        confidence=0.65,
+        bbox={"x": 0.1, "y": 0.2, "w": 0.3, "h": 0.4},
+        timestamp_in_video=12.0,
+        frame_hf_path="media/frame_12.jpg",
+    )
+    db_session.add_all([media, video_detection])
+    await db_session.commit()
+
+    response = await client.patch(
+        f"/api/lab/{video_detection.id}",
+        json={
+            "item_type": "video",
+            "lat": 47.1,
+            "lng": 20.1,
+            "address": "Updated address",
+            "detections": [
+                {
+                    "label": "glass",
+                    "bbox": {"x": 0.15, "y": 0.2, "w": 0.3, "h": 0.4},
+                    "area_sqm": 1.25,
+                },
+                {
+                    "label": "paper",
+                    "bbox": {"x": 0.5, "y": 0.5, "w": 0.2, "h": 0.2},
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+    data = response.json()
+    assert data["id"] == str(video_detection.id)
+    assert data["label"] == "glass"
+    assert data["confidence"] == 1.0
+    assert data["lat"] == 47.1
+    assert data["lng"] == 20.1
+
+    detections_result = await db_session.execute(
+        select(VideoDetection)
+        .where(VideoDetection.media_id == media.id)
+        .order_by(VideoDetection.label)
+    )
+    detections = detections_result.scalars().all()
+    assert [detection.label for detection in detections] == ["glass", "paper"]
+    assert all(detection.confidence == 1.0 for detection in detections)
+    assert all(detection.is_manual for detection in detections)
+    assert all(detection.timestamp_in_video == 12.0 for detection in detections)
+    assert all(
+        detection.frame_hf_path == "media/frame_12.jpg"
+        for detection in detections
+    )
+
+    log_result = await db_session.execute(
+        select(MediaLog).where(MediaLog.media_id == media.id)
+    )
+    assert log_result.scalars().first() is not None
+
+
+@pytest.mark.asyncio
+async def test_patch_video_detection_can_delete_selected_detection(
+    auth_client, db_session
+):
+    client = auth_client["client"]
+    user = auth_client["user"]
+
+    media = Media(
+        id=uuid.uuid4(),
+        uploader_id=user.id,
+        media_type=MediaType.VIDEO,
+    )
+    video_detection = VideoDetection(
+        id=uuid.uuid4(),
+        media_id=media.id,
+        lat=47.0,
+        lng=20.0,
+        altitude=120.0,
+        location="SRID=4326;POINT(20.0 47.0)",
+        label="plastic",
+        confidence=0.65,
+        bbox={"x": 0.1, "y": 0.2, "w": 0.3, "h": 0.4},
+        timestamp_in_video=12.0,
+        frame_hf_path="media/frame_12.jpg",
+    )
+    db_session.add_all([media, video_detection])
+    await db_session.commit()
+
+    response = await client.patch(
+        f"/api/lab/{video_detection.id}",
+        json={"item_type": "video", "detections": []},
+    )
+
+    assert response.status_code == status.HTTP_204_NO_CONTENT
+    deleted_result = await db_session.execute(
+        select(VideoDetection).where(VideoDetection.id == video_detection.id)
+    )
+    assert deleted_result.scalar_one_or_none() is None
+
+    log_result = await db_session.execute(
+        select(MediaLog).where(MediaLog.media_id == media.id)
+    )
+    assert log_result.scalars().first() is not None

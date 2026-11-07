@@ -10,15 +10,19 @@ worker_signal = asyncio.Condition()
 
 class ConnectionManager:
     def __init__(self):
-        self.active_connections: Dict[str, WebSocket] = {}
+        self.active_connections: Dict[str, set[WebSocket]] = {}
         self.hf_cooldown_until: Optional[datetime] = None
 
     async def connect(self, user_id: str, websocket: WebSocket):
         await websocket.accept()
-        self.active_connections[user_id] = websocket
+        self.active_connections.setdefault(user_id, set()).add(websocket)
 
-    def disconnect(self, user_id: str):
-        self.active_connections.pop(user_id, None)
+    def disconnect(self, user_id: str, websocket: WebSocket):
+        connections = self.active_connections.get(user_id)
+        if connections is not None:
+            connections.discard(websocket)
+            if not connections:
+                self.active_connections.pop(user_id, None)
 
     async def send_status(
         self,
@@ -31,8 +35,7 @@ class ConnectionManager:
         failed_reason: Optional[str] = None,
     ):
         """Sends a JSON packet to a specific user's dashboard."""
-        if user_id in self.active_connections:
-            websocket = self.active_connections[user_id]
+        for websocket in tuple(self.active_connections.get(user_id, ())):
             payload = {
                 "type": "MEDIA_STATUS_UPDATE",
                 "media_id": str(media_id),
@@ -46,7 +49,7 @@ class ConnectionManager:
             try:
                 await websocket.send_json(payload)
             except Exception:
-                self.disconnect(user_id)
+                self.disconnect(user_id, websocket)
 
     def is_hf_rate_limited(self) -> bool:
         if self.hf_cooldown_until:

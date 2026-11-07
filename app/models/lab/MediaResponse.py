@@ -1,13 +1,31 @@
-from pydantic import BaseModel
-from typing import Optional, List
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+from typing import List, Literal, Optional
 from datetime import datetime
+from uuid import UUID
+
+
+class NormalizedBBox(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+    x: float = Field(ge=0, le=1, strict=True)
+    y: float = Field(ge=0, le=1, strict=True)
+    w: float = Field(gt=0, le=1, strict=True)
+    h: float = Field(gt=0, le=1, strict=True)
+
+    @model_validator(mode="after")
+    def check_image_bounds(self):
+        # Normalized coordinates can incur tiny floating-point rounding errors.
+        if self.x + self.w > 1 + 1e-9 or self.y + self.h > 1 + 1e-9:
+            raise ValueError("Bounding box must stay within the image")
+        return self
 
 
 class DetectionInput(BaseModel):
     """Detection input for PATCH requests"""
-    label: str
-    bbox: dict
-    area_sqm: Optional[float] = None
+    id: Optional[UUID] = None
+    label: str = Field(min_length=1)
+    bbox: NormalizedBBox
+    area_sqm: Optional[float] = Field(default=None, ge=0, allow_inf_nan=False)
 
 
 class DetectionResponse(BaseModel):
@@ -19,6 +37,8 @@ class DetectionResponse(BaseModel):
 
 
 class MediaResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     uploader_id: str
     status: str
@@ -38,9 +58,6 @@ class MediaResponse(BaseModel):
     original_media_id: Optional[str] = None
     detections: List[DetectionResponse]
 
-    class Config:
-        from_attributes = True
-
 
 class VideoDetectionResponse(BaseModel):
     id: str
@@ -54,7 +71,7 @@ class VideoDetectionResponse(BaseModel):
     confidence: float
     bbox: dict  # {"x", "y", "w", "h"}
 
-    timestamp_in_video: int  # Seconds
+    timestamp_in_video: float  # Seconds, including fractional precision
 
     frame_hf_path: str
 
@@ -64,9 +81,9 @@ class VideoDetectionResponse(BaseModel):
 
 class MediaPatchRequest(BaseModel):
     """Request model for PATCH endpoint"""
-    lat: Optional[float] = None
-    lng: Optional[float] = None
-    altitude: Optional[float] = None
+    lat: Optional[float] = Field(default=None, ge=-90, le=90, allow_inf_nan=False)
+    lng: Optional[float] = Field(default=None, ge=-180, le=180, allow_inf_nan=False)
+    altitude: Optional[float] = Field(default=None, ge=0, le=3000, allow_inf_nan=False)
     address: Optional[str] = None
     detections: Optional[List[DetectionInput]] = None
-    item_type: Optional[str] = None
+    item_type: Literal["image", "video"] = "image"

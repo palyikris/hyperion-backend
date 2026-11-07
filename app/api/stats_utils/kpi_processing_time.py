@@ -6,7 +6,7 @@ to READY status. This measures system responsiveness and identifies bottlenecks.
 """
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, case, or_
 
 from app.models.db.Media import Media
 from app.models.db.MediaLog import MediaLog
@@ -33,8 +33,8 @@ async def get_mean_time_to_process(
     - Uses EXTRACT('epoch', ...) to convert interval to seconds
 
     Processing Time Calculation:
-        latency = MAX(timestamp) - MIN(timestamp) for each media_id
-        This captures the full pipeline duration from first to last log entry.
+        The first successful READY status ends the pipeline. Later manual
+        validations and unrelated log entries must not extend its duration.
 
     Identifying Bottlenecks:
         By grouping averages by worker_name, we can identify which workers
@@ -45,6 +45,19 @@ async def get_mean_time_to_process(
         - overall_avg_seconds: System-wide average processing time
         - by_worker: List of per-worker processing times and task counts
     """
+    ready_time = func.min(
+        case(
+            (MediaLog.message.like("Status changed to READY%"), MediaLog.timestamp),
+            else_=None,
+        )
+    )
+    log_filters = (
+        Media.uploader_id == user_id,
+        Media.status == MediaStatus.READY,
+        MediaLog.action == "STATUS_CHANGE",
+        or_(MediaLog.worker_name.is_(None), MediaLog.worker_name != "You"),
+    )
+
     # Stage 1a: Subquery to compute start/end times per media per worker
     # Used for per-worker latency metrics
     worker_subquery = (
@@ -52,14 +65,12 @@ async def get_mean_time_to_process(
             MediaLog.media_id,
             MediaLog.worker_name,
             func.min(MediaLog.timestamp).label("start_time"),  # First log entry
-            func.max(MediaLog.timestamp).label("end_time"),  # Last log entry
+            ready_time.label("end_time"),
         )
         .join(Media, MediaLog.media_id == Media.id)
-        .where(
-            Media.uploader_id == user_id,
-            Media.status == MediaStatus.READY,  # Only successful completions
-        )
+        .where(*log_filters)
         .group_by(MediaLog.media_id, MediaLog.worker_name)
+        .having(ready_time.isnot(None))
     ).subquery()
 
     # Stage 1b: Subquery to compute full pipeline duration per media item
@@ -68,11 +79,12 @@ async def get_mean_time_to_process(
         select(
             MediaLog.media_id,
             func.min(MediaLog.timestamp).label("start_time"),
-            func.max(MediaLog.timestamp).label("end_time"),
+            ready_time.label("end_time"),
         )
         .join(Media, MediaLog.media_id == Media.id)
-        .where(Media.uploader_id == user_id, Media.status == MediaStatus.READY)
+        .where(*log_filters)
         .group_by(MediaLog.media_id)
+        .having(ready_time.isnot(None))
     ).subquery()
 
     # Stage 2a: Calculate average latency grouped by worker

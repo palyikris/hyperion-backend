@@ -63,7 +63,7 @@ async def get_hotspot_density(
     video_query = (
         select(func.count(VideoDetection.id))
         .where(
-            VideoDetection.confidence >= HOTSPOT_CONFIDENCE_THRESHOLD,
+            VideoDetection.confidence >= HOTSPOT_CONFIDENCE_THRESHOLD / 100,
             VideoDetection.location.isnot(None),
             Media.uploader_id == user_id,
         )
@@ -99,7 +99,7 @@ async def get_hotspot_density(
                 ).label("snapped")
             )
             .where(
-                VideoDetection.confidence >= HOTSPOT_CONFIDENCE_THRESHOLD,
+                VideoDetection.confidence >= HOTSPOT_CONFIDENCE_THRESHOLD / 100,
                 VideoDetection.location.isnot(None),
                 Media.uploader_id == user_id,
             )

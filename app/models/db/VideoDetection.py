@@ -33,7 +33,9 @@ class VideoDetection(Base):
     frame_hf_path: Mapped[str] = mapped_column(String, nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=lambda: datetime.now(timezone.utc)
+        # The existing column stores UTC without a timezone. asyncpg rejects
+        # timezone-aware values for TIMESTAMP WITHOUT TIME ZONE.
+        DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None)
     )
 
     is_manual: Mapped[bool] = mapped_column(Boolean, default=False)

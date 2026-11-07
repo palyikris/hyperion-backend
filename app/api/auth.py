@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import delete, select
+from sqlalchemy.dialects.postgresql import insert
 from app.database import get_db
 from app.core import security
 from app.models.db.User import User
@@ -17,8 +18,9 @@ from app.models.auth.auth import (
 )
 from fastapi import Response
 from app.api.deps import get_current_user
-from datetime import datetime, timedelta, timezone
-from jose import jwt
+from datetime import datetime, timezone
+from jose import jwt, JWTError
+import asyncio
 import logging
 
 router = APIRouter()
@@ -57,7 +59,7 @@ async def signup(user_data: UserModel, db: AsyncSession = Depends(get_db)):
 
     new_user = User(
         email=user_data.email,
-        hashed_password=security.hash_password(user_data.password),
+        hashed_password=await asyncio.to_thread(security.hash_password, user_data.password),
         full_name=user_data.full_name or "Unnamed User",
     )
     
@@ -81,8 +83,8 @@ async def login(user_data: UserModelForLogin, db: AsyncSession = Depends(get_db)
     # kinda like first() but async and returns None if not found
     user = result.scalar_one_or_none()
 
-    if not user or not security.verify_password(
-        user_data.password, user.hashed_password
+    if not user or not await asyncio.to_thread(
+        security.verify_password, user_data.password, user.hashed_password
     ):
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
@@ -107,7 +109,9 @@ async def login(user_data: UserModelForLogin, db: AsyncSession = Depends(get_db)
         httponly=True,
         max_age=security.get_access_token_expiry_seconds(),
         expires=security.get_access_token_expiry_seconds(),
-        samesite="none",  # CSRF protection
+        # Cross-site frontend deployments need SameSite=None. Unsafe requests
+        # are protected separately by the Origin-checking middleware.
+        samesite="none",
         secure=True,  # set to True in production (HTTPS)
         path="/",  # cookie is valid for the entire site
     )
@@ -135,38 +139,41 @@ async def logout(request: Request, db: AsyncSession = Depends(get_db)):
 
     if token:
         try:
-            await prune_expired_blacklisted_tokens(db)
             # Decode token to get expiration time
             payload = jwt.decode(
-                token, security.SECRET_KEY or "", algorithms=[security.ALGORITHM]
+                token, security.SECRET_KEY or "", algorithms=[security.ALGORITHM],
+                options={"require_exp": True, "require_sub": True},
             )
-            email = payload.get("sub", "unknown")
-            exp = payload.get("exp")
-
-            # Convert exp timestamp to datetime
-            expires_at = (
-                datetime.fromtimestamp(exp, tz=timezone.utc)
-                if exp
-                else datetime.now(timezone.utc) + timedelta(hours=1)
+            await prune_expired_blacklisted_tokens(db)
+            await db.execute(
+                insert(TokenBlacklist)
+                .values(
+                    token=token,
+                    user_email=payload["sub"],
+                    expires_at=datetime.fromtimestamp(payload["exp"], tz=timezone.utc),
+                )
+                .on_conflict_do_nothing(index_elements=[TokenBlacklist.token])
             )
-
-            # Add token to blacklist
-            blacklisted_token = TokenBlacklist(
-                token=token,
-                user_email=email,
-                expires_at=expires_at,
-            )
-            db.add(blacklisted_token)
             await db.commit()
-        except Exception as e:
-            logger.warning("Error blacklisting token: %s", e)
-            # Still proceed with logout even if blacklist fails
+        except JWTError:
+            # An expired or invalid token no longer grants access.
+            pass
+        except Exception as exc:
+            await db.rollback()
+            # SQL exception text may contain the complete bearer token.
+            logger.warning("Token revocation failed (%s)", type(exc).__name__)
+            return JSONResponse(
+                content={"detail": "Logout could not be completed. Please try again."},
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
 
     response = JSONResponse(
         content={"message": "Logout successful"},
         status_code=status.HTTP_200_OK,
     )
-    response.delete_cookie("access_token")
+    response.delete_cookie(
+        "access_token", path="/", secure=True, httponly=True, samesite="none"
+    )
     return response
 
 

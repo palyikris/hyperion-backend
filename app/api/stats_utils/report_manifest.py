@@ -12,6 +12,8 @@ operational planning.
 from io import BytesIO
 from datetime import datetime, timezone, timedelta
 from typing import BinaryIO
+import os
+from huggingface_hub import hf_hub_url
 
 import pandas as pd
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -56,11 +58,14 @@ def _build_hf_url(hf_path: str | None, uploader_id: str, media_id: str) -> str:
     Returns:
         Full URL to the image on Hugging Face, or "N/A" if hf_path is missing
     """
-    if not hf_path:
+    repo_id = os.getenv("HF_REPO_ID", "").strip()
+    if not hf_path or not repo_id:
         return "N/A"
 
-    base_url = "https://huggingface.co/datasets/palyikris/hyperion-media/resolve/main"
-    return f"{base_url}/{hf_path}"
+    try:
+        return hf_hub_url(repo_id, hf_path, repo_type="dataset")
+    except ValueError:
+        return "N/A"
 
 
 async def generate_manifest_data(
@@ -274,11 +279,20 @@ def _get_translation(language: str, key: str) -> str:
     return TRANSLATIONS[lang].get(key, TRANSLATIONS["en"].get(key, key))
 
 
+MANIFEST_COLUMNS = [
+    "Media ID", "Detection ID", "Filename", "Latitude", "Longitude",
+    "Drone Altitude (m)", "Address", "Object Label", "Confidence (%)",
+    "Area (sqm)", "Camera Make", "Camera Model", "Date Taken",
+    "Assigned Titan", "Image URL", "Upload Date", "Field Notes", "Cleanup Status",
+]
+
+
 def create_excel_file(data: list[dict], language: str = "en") -> BytesIO:
     """
     Advanced Excel generator with Hyperion branding and filters.
 
     Supports English and Hungarian output (fallback: English).
+    Empty results produce a valid workbook with the full translated header row.
 
     Features:
     - Manifest worksheet with Hyperion Indigo styling
@@ -289,7 +303,8 @@ def create_excel_file(data: list[dict], language: str = "en") -> BytesIO:
         data: List of detection dictionaries
         language: Language code ("hu" for Hungarian, "en" for English, default: "en")
     """
-    df = pd.DataFrame(data)
+    # Keep the full, translated header schema even when no detections match.
+    df = pd.DataFrame(data, columns=MANIFEST_COLUMNS)
     buffer = BytesIO()
 
     # Hyperion Brand Colors
@@ -312,7 +327,7 @@ def create_excel_file(data: list[dict], language: str = "en") -> BytesIO:
         df_with_nav.insert(
             3,
             "Navigation",
-            df_with_nav.apply(
+            [] if df_with_nav.empty else df_with_nav.apply(
                 lambda row: (
                     f"=HYPERLINK(\"https://maps.google.com/maps?q={row['Latitude']},{row['Longitude']}\",\"{_get_translation(language, 'Open Maps')}\")"
                     if row["Latitude"] != _get_translation(language, "N/A")
@@ -378,10 +393,11 @@ def create_excel_file(data: list[dict], language: str = "en") -> BytesIO:
                     end_type="max",
                     end_color="00B050",  # Green
                 )
-                worksheet.conditional_formatting.add(
-                    f"{column_letter}2:{column_letter}{max_row}",
-                    color_scale,
-                )
+                if max_row > 1:
+                    worksheet.conditional_formatting.add(
+                        f"{column_letter}2:{column_letter}{max_row}",
+                        color_scale,
+                    )
                 break
 
         # Apply formatting to all cells

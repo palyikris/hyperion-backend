@@ -15,9 +15,12 @@ async def _get_user_from_token(token: str, db: AsyncSession) -> User:
         )
 
     try:
-        payload = jwt.decode(token, SECRET_KEY or "", algorithms=[ALGORITHM])
-        email: str = payload.get("sub") or ""
-        if email is None:
+        payload = jwt.decode(
+            token, SECRET_KEY or "", algorithms=[ALGORITHM],
+            options={"require_exp": True, "require_sub": True},
+        )
+        email = payload.get("sub")
+        if not isinstance(email, str) or not email.strip():
             raise HTTPException(status_code=401, detail="Invalid token")
     except JWTError:
         raise HTTPException(status_code=401, detail="Token expired or invalid")

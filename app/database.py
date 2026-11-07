@@ -12,6 +12,7 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 engine = create_async_engine(
     DATABASE_URL or "",
     echo=False,
+    hide_parameters=True,  # SQL errors must not expose tokens or password hashes.
     pool_pre_ping=True,  # verify connections are alive before using them
     pool_size=20,
     max_overflow=10,  # allow up to 10 additional connections beyond the pool_size when needed

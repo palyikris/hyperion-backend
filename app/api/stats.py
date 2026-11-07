@@ -1,8 +1,7 @@
-import asyncio
-
 from fastapi import APIRouter, Depends, Query, status
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
+import asyncio
 
 from app.database import get_db
 from app.api.deps import get_current_user
@@ -32,6 +31,22 @@ from app.api.stats_utils import (
 )
 
 router = APIRouter()
+
+
+async def _collect_statistics(
+    db: AsyncSession, user_id: str, days: int
+) -> StatsSummaryResponse:
+    # AsyncSession owns one transaction/connection and must not be shared by
+    # concurrent tasks. Keep these queries sequential on the request session.
+    return StatsSummaryResponse(
+        trash_composition=await get_trash_composition(db, user_id),
+        environmental_footprint=await get_environmental_footprint(db, user_id),
+        ai_fleet_efficiency=await get_ai_fleet_efficiency(db, user_id),
+        temporal_trends=await get_temporal_trends(db, user_id, days),
+        mean_time_to_process=await get_mean_time_to_process(db, user_id),
+        hotspot_density=await get_hotspot_density(db, user_id),
+        days_window=days,
+    )
 
 
 # ==============================================================================
@@ -249,7 +264,7 @@ async def get_stats_summary(
 
     Performance Notes:
         - All queries are user-scoped (no cross-user data leakage)
-        - Queries run in parallel via asyncio.gather for performance
+        - Queries run sequentially on the request's AsyncSession
         - Heavy aggregations benefit from database indexes on:
           - Media.uploader_id
           - Media.status
@@ -265,39 +280,11 @@ async def get_stats_summary(
         return JSONResponse(content=cached_response)
 
     # ------------------------------------------------------------------
-    # FETCH ALL KPIs IN PARALLEL
+    # FETCH ALL KPIs ON THE REQUEST SESSION
     # ------------------------------------------------------------------
     user_id = current_user.id
 
-    # Run all KPI queries concurrently for improved performance
-    (
-        trash_composition,        # KPI 1: Trash Composition
-        environmental_footprint,  # KPI 2: Environmental Footprint
-        ai_fleet_efficiency,      # KPI 3: AI Fleet Efficiency
-        temporal_trends,          # KPI 4: Temporal Trends
-        mean_time_to_process,     # KPI 5: Mean Time to Process
-        hotspot_density,          # KPI 6: Hotspot Density
-    ) = await asyncio.gather(
-        get_trash_composition(db, user_id),
-        get_environmental_footprint(db, user_id),
-        get_ai_fleet_efficiency(db, user_id),
-        get_temporal_trends(db, user_id, days),
-        get_mean_time_to_process(db, user_id),
-        get_hotspot_density(db, user_id),
-    )
-
-    # ------------------------------------------------------------------
-    # BUILD RESPONSE
-    # ------------------------------------------------------------------
-    response = StatsSummaryResponse(
-        trash_composition=trash_composition,
-        environmental_footprint=environmental_footprint,
-        ai_fleet_efficiency=ai_fleet_efficiency,
-        temporal_trends=temporal_trends,
-        mean_time_to_process=mean_time_to_process,
-        hotspot_density=hotspot_density,
-        days_window=days  # Echo the time window for frontend reference
-    )
+    response = await _collect_statistics(db, user_id, days)
 
     # ------------------------------------------------------------------
     # UPDATE CACHE
@@ -427,7 +414,9 @@ async def get_cleanup_manifest_report(
     manifest_data = await generate_manifest_data(db, current_user.id, days)
 
     # Convert to Excel file in memory with specified language
-    excel_buffer = create_excel_file(manifest_data, language=language)
+    excel_buffer = await asyncio.to_thread(
+        create_excel_file, manifest_data, language=language
+    )
 
     # Generate timestamped and localized filename
     from datetime import datetime
@@ -497,8 +486,7 @@ async def get_statistics_pdf_report(
         6. Hotspot Density: High-confidence detection zones
 
     Data Aggregation:
-        - Fetches all KPI data in parallel for performance
-        - Caches available statistics when possible
+        - Fetches all KPI data sequentially on the request session
         - User-scoped (no cross-user data leakage)
 
     Response:
@@ -521,29 +509,21 @@ async def get_statistics_pdf_report(
 
     Performance Notes:
         - Generates PDF in memory (no disk I/O on server)
-        - Parallel query execution for KPI data fetching
+        - Sequential query execution on a single AsyncSession
         - Supports large datasets efficiently
     """
     # ------------------------------------------------------------------
-    # FETCH ALL KPIs IN PARALLEL (same as summary endpoint)
+    # FETCH ALL KPIs (same collector as the summary endpoint)
     # ------------------------------------------------------------------
     user_id = current_user.id
 
-    (
-        trash_composition,  # KPI 1
-        environmental_footprint,  # KPI 2
-        ai_fleet_efficiency,  # KPI 3
-        temporal_trends,  # KPI 4
-        mean_time_to_process,  # KPI 5
-        hotspot_density,  # KPI 6
-    ) = await asyncio.gather(
-        get_trash_composition(db, user_id),
-        get_environmental_footprint(db, user_id),
-        get_ai_fleet_efficiency(db, user_id),
-        get_temporal_trends(db, user_id, days),
-        get_mean_time_to_process(db, user_id),
-        get_hotspot_density(db, user_id),
-    )
+    collected = await _collect_statistics(db, user_id, days)
+    trash_composition = collected.trash_composition
+    environmental_footprint = collected.environmental_footprint
+    ai_fleet_efficiency = collected.ai_fleet_efficiency
+    temporal_trends = collected.temporal_trends
+    mean_time_to_process = collected.mean_time_to_process
+    hotspot_density = collected.hotspot_density
 
     # ------------------------------------------------------------------
     # BUILD STATISTICS DATA DICTIONARY

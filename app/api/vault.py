@@ -2,8 +2,9 @@ import logging
 from fastapi import APIRouter, Depends, Query, status, HTTPException
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc, asc, update, func
-from typing import Optional, List
+from sqlalchemy import select, desc, asc, update, func, literal, union_all
+from sqlalchemy.orm import selectinload
+from typing import Optional
 
 from app.database import get_db
 from app.api.deps import get_current_user
@@ -13,6 +14,8 @@ from app.models.upload.MediaStatus import MediaStatus
 from app.models.vault.VaultResponse import VaultResponse
 from app.api.upload_utils.hf_upload import delete_from_hf
 from app.api.vault_utils.temp_file_finder import find_temp_video_file
+from app.api.map import invalidate_map_stats_cache
+from app.api.stats_utils.cache import invalidate_stats_cache
 
 router = APIRouter()
 
@@ -51,111 +54,92 @@ async def get_media_vault(
     Retrieves the user's personal media library with advanced search and filtering.
     """
 
-    print(f"!!! MY ACTIVE USER ID IS: {current_user.id} !!!")  # <--- ADD THIS
-
-    query = select(Media).where(Media.uploader_id == current_user.id)
-    video_query = select(VideoDetection).where(
-        VideoDetection.media_id.in_(
-            select(Media.id).where(Media.uploader_id == current_user.id)
-        )
-    )
-
-    if status_filter:
-        query = query.where(Media.status == status_filter)
-        video_query = video_query.where(
-            VideoDetection.media_id.in_(
-                select(Media.id).where(
-                    Media.uploader_id == current_user.id, Media.status == status_filter
-                )
-            )
-        )
-
-    if search:
-        query = query.where(
-            Media.initial_metadata["filename"].as_string().ilike(f"%{search}%")
-        )
-        video_query = video_query.where(
-            VideoDetection.media_id.in_(
-                select(Media.id).where(
-                    Media.uploader_id == current_user.id,
-                    Media.initial_metadata["filename"].as_string().ilike(f"%{search}%"),
-                )
-            )
-        )
-
+    filename = func.coalesce(Media.initial_metadata["filename"].as_string(), "")
     column_map = {
         "created_at": Media.created_at,
         "status": Media.status,
-        "filename": Media.initial_metadata["filename"].as_string(),
+        "filename": filename,
     }
-
     sort_column = column_map.get(order_by, Media.created_at)
-    if direction == "desc":
-        query = query.order_by(desc(sort_column))
-        video_query = video_query.order_by(desc(VideoDetection.created_at))
-    else:
-        query = query.order_by(asc(sort_column))
-        video_query = video_query.order_by(asc(VideoDetection.created_at))
-
-    offset = (page - 1) * page_size
-
-    count_query = (
-        select(func.count())
-        .select_from(Media)
-        .where(Media.uploader_id == current_user.id)
+    video_sort_column = (
+        VideoDetection.created_at
+        if order_by not in ("filename", "status")
+        else sort_column
     )
-    count_video_query = (
-        select(func.count())
-        .select_from(VideoDetection)
-        .where(
-            VideoDetection.media_id.in_(
-                select(Media.id).where(Media.uploader_id == current_user.id)
-            )
-        )
-    )
-
+    filters = [Media.uploader_id == current_user.id]
     if status_filter:
-        count_query = count_query.where(Media.status == status_filter)
-        count_video_query = count_video_query.where(
-            VideoDetection.media_id.in_(
-                select(Media.id).where(
-                    Media.uploader_id == current_user.id, Media.status == status_filter
-                )
-            )
-        )
-
+        filters.append(Media.status == status_filter)
     if search:
-        count_query = count_query.where(
-            Media.initial_metadata["filename"].as_string().ilike(f"%{search}%")
+        filters.append(filename.ilike(f"%{search}%"))
+
+    # Page one combined sequence of lightweight references. Applying LIMIT to
+    # each entity separately would return up to twice the requested page size.
+    entries = union_all(
+        select(
+            Media.id.label("item_id"),
+            literal("media").label("item_type"),
+            sort_column.label("sort_value"),
+        ).where(*filters),
+        select(
+            VideoDetection.id.label("item_id"),
+            literal("video").label("item_type"),
+            video_sort_column.label("sort_value"),
         )
-        count_video_query = count_video_query.where(
-            VideoDetection.media_id.in_(
-                select(Media.id).where(
-                    Media.uploader_id == current_user.id,
-                    Media.initial_metadata["filename"].as_string().ilike(f"%{search}%"),
-                )
+        .join(Media, VideoDetection.media_id == Media.id)
+        .where(*filters),
+    ).subquery()
+    count_result = await db.execute(select(func.count()).select_from(entries))
+    total = count_result.scalar_one()
+    ordering = desc if direction == "desc" else asc
+    page_result = await db.execute(
+        select(entries.c.item_id, entries.c.item_type)
+        .order_by(
+            ordering(entries.c.sort_value).nulls_last(),
+            entries.c.item_type,
+            entries.c.item_id,
+        )
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    page_entries = page_result.all()
+    positions = {
+        (row.item_type, row.item_id): index
+        for index, row in enumerate(page_entries)
+    }
+    media_ids = [row.item_id for row in page_entries if row.item_type == "media"]
+    video_ids = [row.item_id for row in page_entries if row.item_type == "video"]
+    records = []
+    video_detections = []
+    if media_ids:
+        result = await db.execute(
+            select(Media).where(
+                Media.id.in_(media_ids), Media.uploader_id == current_user.id,
             )
         )
-
-    count_result = await db.execute(count_query)
-    count_video_result = await db.execute(count_video_query)
-    total = count_result.scalar_one()
-    total_video_detections = count_video_result.scalar_one()
-
-    query = query.offset(offset).limit(page_size)
-    video_query = video_query.offset(offset).limit(page_size)
-
-    result = await db.execute(query)
-    video_result = await db.execute(video_query)
-
-    records = result.scalars().all()
-    video_detections = video_result.scalars().all()
+        records = sorted(
+            result.scalars().all(),
+            key=lambda item: positions[("media", item.id)],
+        )
+    if video_ids:
+        result = await db.execute(
+            select(VideoDetection)
+            .join(Media, VideoDetection.media_id == Media.id)
+            .options(selectinload(VideoDetection.media))
+            .where(
+                VideoDetection.id.in_(video_ids),
+                Media.uploader_id == current_user.id,
+            )
+        )
+        video_detections = sorted(
+            result.scalars().all(),
+            key=lambda item: positions[("video", item.id)],
+        )
 
     return {
-        "total": total + total_video_detections,
+        "total": total,
         "page": page,
         "page_size": page_size,
-        "total_pages": (total + total_video_detections + page_size - 1) // page_size,
+        "total_pages": (total + page_size - 1) // page_size,
         "image_items": [
             {
                 "id": str(media.id),
@@ -185,6 +169,7 @@ async def get_media_vault(
             {
                 "id": str(video_det.id),
                 "media_id": str(video_det.media_id),
+                "filename": (video_det.media.initial_metadata or {}).get("filename"),
                 "lat": video_det.lat,
                 "lng": video_det.lng,
                 "altitude": video_det.altitude,
@@ -216,6 +201,8 @@ async def delete_all_media(
     media_items = result.scalars().all()
 
     if not media_items:
+        invalidate_map_stats_cache(str(current_user.id))
+        invalidate_stats_cache(str(current_user.id))
         return JSONResponse(
             content={"detail": "No media found to delete", "deleted_count": 0}
         )
@@ -241,6 +228,8 @@ async def delete_all_media(
         logger.info(f"Deleted media id={media.id}")
 
     await db.commit()
+    invalidate_map_stats_cache(str(current_user.id))
+    invalidate_stats_cache(str(current_user.id))
 
     return JSONResponse(
         content={
@@ -338,6 +327,8 @@ async def delete_media(
     await db.delete(media)
     logger.info(f"Deleted media id={media.id}")
     await db.commit()
+    invalidate_map_stats_cache(str(current_user.id))
+    invalidate_stats_cache(str(current_user.id))
 
     detail_msg = "Media deleted successfully"
     if temp_file_status:

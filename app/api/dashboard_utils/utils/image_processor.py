@@ -16,6 +16,7 @@ from sqlalchemy import update, select
 from .hf_metadata import extract_metadata_from_hf
 import asyncio
 from app.api.ai_client import get_real_detections
+from .worker_state import record_completed_task
 
 DUPLICATE_DISTANCE_METERS = 10
 
@@ -168,14 +169,7 @@ async def process_image_media(media_task, name, uploader_id):
 
         task.status = MediaStatus.READY
 
-        await session.execute(
-            update(AIWorkerState)
-            .where(AIWorkerState.name == name)
-            .values(
-                status="Active",
-                tasks_processed_today=AIWorkerState.tasks_processed_today + 1,
-            )
-        )
+        await record_completed_task(session, name)
         add_status_log(session, task.id, MediaStatus.READY, name)
         await session.commit()
 

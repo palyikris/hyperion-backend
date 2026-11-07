@@ -15,7 +15,7 @@ class AIWorkerState(Base):
     tasks_processed_today: Mapped[int] = mapped_column(Integer, default=0)
     last_reset_date: Mapped[date] = mapped_column(Date, default=date.today)
     last_ping: Mapped[datetime] = mapped_column(
-        DateTime, default=lambda: datetime.now(timezone.utc)
+        DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None)
     )
 
     # current task id is tracked in the Media table via assigned_worker

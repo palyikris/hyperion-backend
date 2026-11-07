@@ -90,3 +90,42 @@ async def test_get_me_protected_route(client: AsyncClient):
     auth_response = await client.get("/api/auth/me")
     assert auth_response.status_code == 200
     assert auth_response.json()["email"] == "me@example.com"
+
+
+async def test_csrf_rejects_untrusted_origin(auth_client):
+    client = auth_client["client"]
+    client.headers["Origin"] = "https://attacker.example"
+
+    response = await client.put(
+        "/api/auth/me",
+        json={"full_name": "Cross-site change"},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Cross-site request blocked"
+
+
+async def test_csrf_rejects_missing_origin(auth_client):
+    client = auth_client["client"]
+    del client.headers["Origin"]
+
+    response = await client.put(
+        "/api/auth/me",
+        json={"full_name": "Originless change"},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Cross-site request blocked"
+
+
+async def test_csrf_rejects_same_host_with_different_scheme(auth_client):
+    client = auth_client["client"]
+    client.headers["Origin"] = "http://test"
+
+    response = await client.put(
+        "/api/auth/me",
+        json={"full_name": "Downgraded-origin change"},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Cross-site request blocked"

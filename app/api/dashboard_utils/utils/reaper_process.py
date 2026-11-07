@@ -59,6 +59,8 @@ async def ai_reaper_process():
             await asyncio.sleep(RATE_LIMIT_BACKOFF_SECONDS)
             continue
 
+        notifications = []
+        wake_workers = False
         async with AsyncSessionLocal() as session:
             try:
                 now = datetime.now(timezone.utc)
@@ -76,15 +78,13 @@ async def ai_reaper_process():
                     )
                 )
 
-                if stale_uploaded.scalars().first():
-                    async with worker_signal:
-                        worker_signal.notify_all()
+                wake_workers = stale_uploaded.scalars().first() is not None
 
                 stale_pending_query = await session.execute(
                     select(Media).where(
                         Media.status == MediaStatus.PENDING,
                         Media.updated_at <= pending_threshold,
-                    )
+                    ).with_for_update(skip_locked=True)
                 )
                 stale_pending_tasks = stale_pending_query.scalars().all()
 
@@ -99,13 +99,13 @@ async def ai_reaper_process():
                     )
                     session.add(failure_log)
 
-                    await manager.send_status(
+                    notifications.append(dict(
                         user_id=str(task.uploader_id),
                         media_id=str(task.id),
                         status=MediaStatus.FAILED.value,
                         worker=None,
                         failed_reason=user_friendly_reason,
-                    )
+                    ))
 
                     task.status = MediaStatus.FAILED
                     task.failed_reason = user_friendly_reason
@@ -115,7 +115,7 @@ async def ai_reaper_process():
                 offline_workers_query = await session.execute(
                     select(AIWorkerState.name).where(
                         or_(
-                            AIWorkerState.last_ping <= threshold,
+                            AIWorkerState.last_ping <= threshold.replace(tzinfo=None),
                             AIWorkerState.last_ping == None,
                         )
                     )
@@ -129,7 +129,7 @@ async def ai_reaper_process():
                                 [MediaStatus.EXTRACTING, MediaStatus.PROCESSING]
                             ),
                             Media.assigned_worker.in_(offline_worker_names),
-                        )
+                        ).with_for_update(skip_locked=True)
                     )
                     zombie_tasks = zombie_tasks_query.scalars().all()
 
@@ -142,13 +142,13 @@ async def ai_reaper_process():
                         )
                         session.add(recovery_log)
 
-                        await manager.send_status(
+                        notifications.append(dict(
                             user_id=str(task.uploader_id),
                             media_id=str(task.id),
                             status=MediaStatus.FAILED.value,
                             worker=None,
                             failed_reason=zombie_failed_reason,
-                        )
+                        ))
 
                         task.status = MediaStatus.FAILED
                         task.failed_reason = zombie_failed_reason
@@ -161,3 +161,12 @@ async def ai_reaper_process():
             except Exception as e:
                 print(f"Reaper Error: {e}")
                 await session.rollback()
+                continue
+
+        # Do not announce a failure that could still be rolled back, and do not
+        # hold database locks while communicating with browsers.
+        if wake_workers:
+            async with worker_signal:
+                worker_signal.notify_all()
+        for notification in notifications:
+            await manager.send_status(**notification)

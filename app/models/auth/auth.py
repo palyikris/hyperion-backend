@@ -1,19 +1,24 @@
 from typing import Literal, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 
 SupportedLanguage = Literal["en", "hu"]
 
 
-class UserModel(BaseModel):
-    email: str
-    password: str
-    full_name: Optional[str] = None
-
-
 class UserModelForLogin(BaseModel):
     email: str
     password: str
+
+    @field_validator("password")
+    @classmethod
+    def validate_password_bytes(cls, value: str) -> str:
+        if not 1 <= len(value.encode("utf-8")) <= 72:
+            raise ValueError("Password must contain between 1 and 72 UTF-8 bytes")
+        return value
+
+
+class UserModel(UserModelForLogin):
+    full_name: Optional[str] = None
 
 
 class SignupResponse(BaseModel):

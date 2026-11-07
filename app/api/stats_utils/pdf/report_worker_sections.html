@@ -1,0 +1,35 @@
+{% set hu = language == 'hu' %}
+<div class="section-header">
+    <h2>{{ 'AI-flotta hatékonysága' if hu else 'AI fleet efficiency' }}</h2>
+</div>
+<p>{{ 'Sikeresség' if hu else 'Success rate' }}: {{ fleet_reliability_percent }}%.
+   {{ 'Sikeres feladatok' if hu else 'Successful tasks' }}: {{ total_successes }}.
+   {{ 'Sikertelen feladatok' if hu else 'Failed tasks' }}: {{ total_failures }}.</p>
+<table class="data-table" repeat="1">
+    <thead><tr>
+        <th>{{ 'Munkás' if hu else 'Worker' }}</th>
+        <th>{{ 'Sikeres' if hu else 'Succeeded' }}</th>
+        <th>{{ 'Sikertelen' if hu else 'Failed' }}</th>
+        <th>{{ 'Sikeresség (%)' if hu else 'Success rate (%)' }}</th>
+    </tr></thead>
+    <tbody>{% for worker in fleet_workers %}<tr>
+        <td>{{ worker.name }}</td><td>{{ worker.success_count }}</td>
+        <td>{{ worker.failure_count }}</td><td>{{ worker.reliability_percent }}</td>
+    </tr>{% else %}<tr><td colspan="4">{{ 'Nincs feldolgozott feladat.' if hu else 'No processed tasks.' }}</td></tr>{% endfor %}</tbody>
+</table>
+<div class="section-header">
+    <h2>{{ 'Átlagos feldolgozási idő' if hu else 'Mean time to process' }}</h2>
+</div>
+<p>{{ 'Teljes feldolgozási folyamat' if hu else 'Full processing pipeline' }}: {{ overall_avg_seconds }} s.</p>
+<table class="data-table" repeat="1">
+    <thead><tr>
+        <th>{{ 'Munkás' if hu else 'Worker' }}</th>
+        <th>{{ 'Átlagos idő (s)' if hu else 'Average time (s)' }}</th>
+        <th>{{ 'Feladatok' if hu else 'Tasks' }}</th>
+    </tr></thead>
+    <tbody>{% for worker in processing_workers %}<tr>
+        <td>{{ worker.worker_name }}</td>
+        <td>{{ '%.2f'|format(worker.avg_processing_seconds) }}</td>
+        <td>{{ worker.task_count }}</td>
+    </tr>{% else %}<tr><td colspan="3">{{ 'Nincs mérhető feldolgozási idő.' if hu else 'No processing durations available.' }}</td></tr>{% endfor %}</tbody>
+</table>

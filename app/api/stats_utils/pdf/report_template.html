@@ -4,12 +4,21 @@
     <meta charset="UTF-8" />
     <title>Hyperion Hatás Manifesztó</title>
     <style>
+        @font-face {
+            font-family: HyperionSans;
+            src: url("{{ font_regular_src }}");
+        }
+        @font-face {
+            font-family: HyperionSans;
+            src: url("{{ font_bold_src }}");
+            font-weight: bold;
+        }
         @page {
             size: A4;
-            margin: 0;
+            margin: 15mm 12mm;
         }
         body {
-            font-family: 'Helvetica', 'Arial', sans-serif;
+            font-family: HyperionSans;
             background-color: #F8F9F4;
             color: #4B5563;
             margin: 0;
@@ -21,7 +30,7 @@
         .header {
             background-color: #1A5F54;
             color: #F8F9F4;
-            padding: 50px 50px 30px 50px;
+            padding: 20px;
             border-bottom: 8px solid #C9A66B;
         }
 
@@ -47,9 +56,9 @@
         }
 
         .header h1 {
-            font-size: 40px;
+            font-size: 28px;
             margin: 0;
-            letter-spacing: -1.5px;
+            letter-spacing: 0;
             font-weight: 900;
             line-height: 1;
             color: #F8F9F4;
@@ -58,7 +67,7 @@
         .meta-strip {
             background-color: #2D4A3E;
             color: #A8DADC;
-            padding: 12px 50px;
+            padding: 10px 20px;
             font-size: 10px;
             font-weight: 800;
             text-transform: uppercase;
@@ -68,7 +77,7 @@
         .meta-item { margin-right: 35px; display: inline-block; }
 
         .content {
-            padding: 35px 50px;
+            padding: 15px 0;
         }
 
         .kpi-table {
@@ -106,12 +115,14 @@
         }
 
         .section-header {
+            -pdf-keep-with-next: true;
             margin: 30px 0 15px 0;
             border-left: 5px solid #D97B5A;
             padding-left: 15px;
         }
 
         .section-header h2 {
+            -pdf-keep-with-next: true;
             font-size: 14px;
             text-transform: uppercase;
             letter-spacing: 2px;
@@ -129,6 +140,7 @@
         }
 
         table.data-table {
+            -pdf-keep-with-next: false;
             width: 100%;
             border-collapse: collapse;
         }
@@ -139,12 +151,12 @@
             font-size: 9px;
             text-transform: uppercase;
             text-align: left;
-            padding: 15px 20px;
+            padding: 7px 8px;
             border-bottom: 2px solid #E5E7EB;
         }
 
         table.data-table td {
-            padding: 15px 20px;
+            padding: 7px 8px;
             font-size: 12px;
             border-bottom: 1px solid #E5E7EB;
             color: #2D4A3E;
@@ -180,7 +192,7 @@
         .footer {
             background-color: #1A5F54;
             color: #F8F9F4;
-            padding: 40px 50px;
+            padding: 8px;
             text-align: center;
         }
 
@@ -199,7 +211,7 @@
         }
 
         .footer-logo {
-            width: 150px;
+            width: 64px;
             height: auto;
             display: block;
             margin: 0 auto;
@@ -221,7 +233,7 @@
     <div class="meta-strip">
         <div class="meta-item">Jelent&eacute;s ID: {{ generated_at }}</div>
         <span style="margin: 0 1rem;"></span>
-        <div class="meta-item">Horizont: {{ days_window }} nap</div>
+        <div class="meta-item">Időbeli trend: {{ days_window }} nap</div>
     </div>
 
     <div class="content">
@@ -241,12 +253,14 @@
                 </td>
             </tr>
         </table>
+        <p>A napi trend a kiválasztott időszakot, a többi mutató a teljes feltöltési előzményt összesíti.</p>
+        <p>Magas konfidenciájú helyadatok: {{ high_confidence_media_count }}</p>
 
         <div class="section-header">
             <h2>Analitikai &ouml;sszet&eacute;tel</h2>
         </div>
         <div class="data-box">
-            <table class="data-table">
+            <table class="data-table" repeat="1">
                 <thead>
                     <tr>
                         <th>Anyagt&iacute;pus</th>
@@ -273,12 +287,12 @@
             </table>
         </div>
 
-        <div class="section-header">
-            <h2>Temporális v&aacute;ltoz&aacute;s</h2>
-        </div>
+        {% include 'report_worker_sections.html' %}
+
         <div class="data-box">
-            <table class="data-table">
+            <table class="data-table" repeat="2">
                 <thead>
+                    <tr><th colspan="2" style="font-size: 14px; color: #1A5F54; border-left: 5px solid #D97B5A;">Időbeli trend</th></tr>
                     <tr>
                         <th>Megfigyel&eacute;s d&aacute;tuma</th>
                         <th style="text-align: right;">Aktivit&aacute;s sz&aacute;ma</th>

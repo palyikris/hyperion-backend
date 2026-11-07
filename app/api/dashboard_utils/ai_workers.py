@@ -35,6 +35,20 @@ async def get_worker_status(
     result = await db.execute(select(AIWorkerState))
     worker_records = result.scalars().all()
 
+    # Shared worker health is operational data; current media identifiers belong
+    # only to the requesting user. Batch this instead of querying every worker.
+    task_result = await db.execute(
+        select(Media.id, Media.assigned_worker, Media.status)
+        .where(
+            Media.uploader_id == current_user.id,
+            Media.status.in_([MediaStatus.EXTRACTING, MediaStatus.PROCESSING]),
+        )
+        .order_by(Media.created_at, Media.id)
+    )
+    tasks_by_worker = {}
+    for task in task_result.all():
+        tasks_by_worker.setdefault(task.assigned_worker, task)
+
     nodes = []
     active_count = 0
     working_count = 0
@@ -56,13 +70,7 @@ async def get_worker_status(
         if status_label == "Working":
             working_count += 1
 
-        worker_tasks = await db.execute(
-            select(Media).where(
-                Media.assigned_worker == worker.name,
-                Media.status.in_([MediaStatus.EXTRACTING, MediaStatus.PROCESSING]),
-            )
-        )
-        current_task = worker_tasks.scalars().first()
+        current_task = tasks_by_worker.get(worker.name)
 
         nodes.append(
             {

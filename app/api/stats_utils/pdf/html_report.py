@@ -5,6 +5,7 @@ HTML-based PDF report generator using Jinja2 templates and xhtml2pdf.
 from io import BytesIO
 from datetime import datetime
 from typing import Any
+import asyncio
 import base64
 from functools import lru_cache
 from urllib.request import urlopen
@@ -45,6 +46,12 @@ async def create_pdf_report(
     Returns:
         BytesIO object containing the generated PDF
     """
+    # Logo retrieval and PDF rendering are blocking operations. Keep them off
+    # the event loop so other API requests and worker heartbeats can continue.
+    return await asyncio.to_thread(_create_pdf_report_sync, stats_data, language)
+
+
+def _create_pdf_report_sync(stats_data: dict[str, Any], language: str) -> BytesIO:
     # Prepare template data
     template_data = _prepare_template_data(stats_data, language)
 
@@ -62,6 +69,8 @@ def _prepare_template_data(stats_data: dict[str, Any], language: str) -> dict:
     trash_data = stats_data.get("trash_composition", {})
     footprint_data = stats_data.get("environmental_footprint", {})
     hotspot_data = stats_data.get("hotspot_density", {})
+    fleet_data = stats_data.get("ai_fleet_efficiency", {})
+    processing_data = stats_data.get("mean_time_to_process", {})
     items = trash_data.get("items", [])
     total = trash_data.get("total_detections", 0)
     total_area_sqm = footprint_data.get("total_area_sqm", 0)
@@ -82,13 +91,16 @@ def _prepare_template_data(stats_data: dict[str, Any], language: str) -> dict:
     days_window = temporal_data.get("days_window", 7)
 
     temporal_items = []
-    for trend in trends[-7:]:  # Last 7 items
+    for trend in trends:
         temporal_items.append({
             "date": trend.get("date", "N/A"),
             "count": trend.get("count", 0),
         })
 
     return {
+        "language": language,
+        "font_regular_src": os.path.join(TEMPLATE_DIR, "fonts", "LiberationSans-Regular.ttf"),
+        "font_bold_src": os.path.join(TEMPLATE_DIR, "fonts", "LiberationSans-Bold.ttf"),
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "days_window": days_window,
         "logo_src": _get_logo_src(),
@@ -97,6 +109,16 @@ def _prepare_template_data(stats_data: dict[str, Any], language: str) -> dict:
         "total_area_sqm": f"{float(total_area_sqm):,.2f}",
         "hotspot_count": f"{float(hotspot_count):,.0f}",
         "temporal_trends_items": temporal_items,
+        "fleet_reliability_percent": f"{fleet_data.get('fleet_reliability_score', 0) * 100:.1f}",
+        "total_successes": fleet_data.get("total_successes", 0),
+        "total_failures": fleet_data.get("total_failures", 0),
+        "fleet_workers": [
+            {**worker, "reliability_percent": f"{worker.get('reliability_score', 0) * 100:.1f}"}
+            for worker in fleet_data.get("workers", [])
+        ],
+        "overall_avg_seconds": f"{processing_data.get('overall_avg_seconds', 0):.2f}",
+        "processing_workers": processing_data.get("by_worker", []),
+        "high_confidence_media_count": hotspot_data.get("high_confidence_media_count", 0),
     }
 
 
@@ -125,7 +147,8 @@ def _html_to_pdf(html_content: str) -> BytesIO:
         src=html_content,
         dest=pdf_bytes,
     )
-    
+    if pisa_status.err:
+        raise RuntimeError("Statistics PDF could not be generated")
     
     # Reset position to beginning
     pdf_bytes.seek(0)

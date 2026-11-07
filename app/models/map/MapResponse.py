@@ -22,8 +22,8 @@ class MapItem(BaseModel):
     filename: Optional[str] = None
     status: str
     worker_name: Optional[str] = None
-    lat: float
-    lng: float
+    lat: Optional[float] = None
+    lng: Optional[float] = None
     altitude: Optional[float] = None
     address: Optional[str] = None
     image_url: Optional[str] = None
@@ -33,8 +33,28 @@ class MapItem(BaseModel):
     failed_reason: Optional[str] = None
 
 
+class MapVideoDetection(BaseModel):
+    id: str
+    media_id: str
+    filename: Optional[str] = None
+    status: str
+    worker_name: Optional[str] = None
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    altitude: Optional[float] = None
+    address: Optional[str] = None
+    image_url: str
+    confidence: float
+    label: str
+    bbox: Dict[str, Any]
+    timestamp_in_video: float
+
+
 class MapResponse(BaseModel):
     items: List[MapItem]
+    video_detections: Dict[str, List[MapVideoDetection]] = Field(
+        default_factory=dict
+    )
     total: int
 
 

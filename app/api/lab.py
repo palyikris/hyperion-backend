@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
@@ -11,12 +11,15 @@ from app.models.db.Media import Media
 from app.models.db.Detection import Detection
 from app.models.db.VideoDetection import VideoDetection
 from app.models.lab.MediaResponse import (
+    DetectionInput,
     MediaResponse,
     MediaPatchRequest,
     VideoDetectionResponse,
 )
 from app.api.medialog_utils.media_log_utils import create_status_change_log
 from app.api.upload_utils.metadata_extractor import get_address_from_coords
+from app.api.map import invalidate_map_stats_cache
+from app.api.stats_utils.cache import invalidate_stats_cache
 
 
 router = APIRouter()
@@ -72,15 +75,195 @@ def _serialize_video_detection(video_det: VideoDetection) -> dict:
         "label": video_det.label,
         "confidence": video_det.confidence,
         "bbox": video_det.bbox,
-        "timestamp_in_video": (
-            int(video_det.timestamp_in_video)
-            if video_det.timestamp_in_video is not None
-            else None
-        ),
+        "timestamp_in_video": video_det.timestamp_in_video,
         "frame_hf_path": video_det.frame_hf_path,
         "created_at": video_det.created_at,
         "area_sqm": video_det.area_sqm,
     }
+
+
+def _detection_signature(label: str, bbox: dict) -> tuple[str, str]:
+    normalized_bbox = {key: float(value) for key, value in bbox.items()}
+    return label, json.dumps(normalized_bbox, sort_keys=True)
+
+
+def _update_media_summary(media: Media, count: int, confidence: float) -> None:
+    media.has_trash = count > 0
+    media.confidence = round(confidence * 100, 2) if count else 0.0
+    metadata = dict(media.technical_metadata or {})
+    metadata.update(
+        has_trash=media.has_trash,
+        confidence=media.confidence,
+        detections_count=count,
+    )
+    media.technical_metadata = metadata
+
+
+async def _refresh_video_summary(db: AsyncSession, media: Media) -> None:
+    # Include inserted, edited and deleted detections in the aggregate query.
+    await db.flush()
+    result = await db.execute(
+        select(
+            func.count(VideoDetection.id),
+            func.avg(VideoDetection.confidence),
+        ).where(VideoDetection.media_id == media.id)
+    )
+    count, average_confidence = result.one()
+    _update_media_summary(media, count, average_confidence or 0.0)
+
+
+def _merge_image_detections(
+    media: Media, detections: list[DetectionInput]
+) -> None:
+    """Merge the complete detection list submitted for an image."""
+    existing_by_id = {detection.id: detection for detection in media.detections}
+    for detection in detections:
+        original = existing_by_id.get(detection.id)
+        if (
+            original is not None
+            and original.bbox != detection.bbox.model_dump()
+        ):
+            # A physical area inferred for the old box is no longer reliable.
+            # Do not retain it even when an older client resubmits that value.
+            detection.area_sqm = None
+
+    new_detection_map = {
+        _detection_signature(detection.label, detection.bbox.model_dump()): detection
+        for detection in detections
+    }
+    processed_signatures: set[tuple[str, str]] = set()
+
+    for existing_detection in media.detections[:]:
+        signature = _detection_signature(
+            existing_detection.label, existing_detection.bbox
+        )
+
+        if signature not in new_detection_map:
+            media.detections.remove(existing_detection)
+            continue
+
+        new_detection_data = new_detection_map[signature]
+        if (
+            new_detection_data.area_sqm is not None
+            and new_detection_data.area_sqm != existing_detection.area_sqm
+        ):
+            existing_detection.area_sqm = new_detection_data.area_sqm
+            existing_detection.confidence = 1.0
+            existing_detection.is_manual = True
+
+        processed_signatures.add(signature)
+
+    for signature, new_detection_data in new_detection_map.items():
+        if signature in processed_signatures:
+            continue
+
+        media.detections.append(
+            Detection(
+                media_id=media.id,
+                label=new_detection_data.label,
+                confidence=1.0,
+                bbox=new_detection_data.bbox.model_dump(),
+                area_sqm=new_detection_data.area_sqm,
+                is_manual=True,
+            )
+        )
+
+
+async def _merge_video_detections(
+    db: AsyncSession,
+    video_detection: VideoDetection,
+    detections: list[DetectionInput],
+) -> bool:
+    """Merge edits made on one video evidence frame.
+
+    Returns True when the selected detection was deleted without a replacement.
+    Additional submitted detections inherit the frame, timestamp and location of
+    the selected detection. Exact matches already stored on that frame are not
+    inserted again; a replacement keeps the selected ID if it matches a sibling.
+    """
+    unique_detections: dict[tuple[str, str], DetectionInput] = {}
+    for detection in detections:
+        signature = _detection_signature(detection.label, detection.bbox.model_dump())
+        unique_detections.setdefault(signature, detection)
+
+    if not unique_detections:
+        await db.delete(video_detection)
+        return True
+
+    # The caller holds the parent media lock, serializing sibling edits. Scope
+    # deduplication to this evidence frame, never to other frames or videos.
+    frame_result = await db.execute(
+        select(VideoDetection).where(
+            VideoDetection.media_id == video_detection.media_id,
+            VideoDetection.frame_hf_path == video_detection.frame_hf_path,
+            VideoDetection.timestamp_in_video == video_detection.timestamp_in_video,
+            VideoDetection.id != video_detection.id,
+        )
+    )
+    frame_detections = frame_result.scalars().all()
+
+    existing_signature = _detection_signature(
+        video_detection.label, video_detection.bbox
+    )
+
+    if existing_signature in unique_detections:
+        current_data = unique_detections.pop(existing_signature)
+        if (
+            current_data.area_sqm is not None
+            and current_data.area_sqm != video_detection.area_sqm
+        ):
+            video_detection.area_sqm = current_data.area_sqm
+            video_detection.confidence = 1.0
+            video_detection.is_manual = True
+    else:
+        replacement_signature, replacement = next(iter(unique_detections.items()))
+        unique_detections.pop(replacement_signature)
+        geometry_changed = video_detection.bbox != replacement.bbox.model_dump()
+        video_detection.label = replacement.label
+        video_detection.bbox = replacement.bbox.model_dump()
+        video_detection.area_sqm = (
+            None if geometry_changed else replacement.area_sqm
+        )
+        video_detection.confidence = 1.0
+        video_detection.is_manual = True
+
+    selected_signature = _detection_signature(
+        video_detection.label, video_detection.bbox
+    )
+    sibling_signatures: set[tuple[str, str]] = set()
+    for sibling in frame_detections:
+        signature = _detection_signature(sibling.label, sibling.bbox)
+        if signature == selected_signature:
+            # Preserve the ID returned by this endpoint, but do not leave an
+            # identical sibling behind when a replacement collides with it.
+            await db.delete(sibling)
+        else:
+            sibling_signatures.add(signature)
+
+    for signature, detection in unique_detections.items():
+        if signature in sibling_signatures:
+            continue
+        db.add(
+            VideoDetection(
+                media_id=video_detection.media_id,
+                lat=video_detection.lat,
+                lng=video_detection.lng,
+                altitude=video_detection.altitude,
+                location=(
+                    f"SRID=4326;POINT({video_detection.lng} {video_detection.lat})"
+                ),
+                address=video_detection.address,
+                label=detection.label,
+                confidence=1.0,
+                bbox=detection.bbox.model_dump(),
+                timestamp_in_video=video_detection.timestamp_in_video,
+                frame_hf_path=video_detection.frame_hf_path,
+                is_manual=True,
+                area_sqm=detection.area_sqm,
+            )
+        )
+
+    return False
 
 
 @router.get(
@@ -175,7 +358,8 @@ async def get_video_media(
 @router.patch(
     "/{media_id}",
     status_code=status.HTTP_200_OK,
-    response_model=MediaResponse,
+    response_model=MediaResponse | VideoDetectionResponse,
+    responses={status.HTTP_204_NO_CONTENT: {"description": "Detection deleted"}},
 )
 async def patch_media(
     media_id: str,
@@ -208,16 +392,21 @@ async def patch_media(
                 Media.id == media_uuid,
                 Media.uploader_id == current_user.id,
             )
+            .with_for_update()
         )
     else:
-        query = select(VideoDetection).where(
-            VideoDetection.id == media_uuid,
-            select(Media)
+        query = (
+            select(VideoDetection)
+            .options(selectinload(VideoDetection.media))
             .where(
-                Media.id == VideoDetection.media_id,
-                Media.uploader_id == current_user.id,
+                VideoDetection.id == media_uuid,
+                select(Media)
+                .where(
+                    Media.id == VideoDetection.media_id,
+                    Media.uploader_id == current_user.id,
+                )
+                .exists(),
             )
-            .exists(),
         )
 
     result = await db.execute(query)
@@ -228,6 +417,22 @@ async def patch_media(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Media not found",
         )
+
+    if patch_data.item_type == "video":
+        # Serialize edits to sibling detections so their parent summary cannot
+        # be overwritten by an aggregate calculated before another edit commits.
+        parent_result = await db.execute(
+            select(Media)
+            .where(
+                Media.id == media.media_id,
+                Media.uploader_id == current_user.id,
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        parent_media = parent_result.scalar_one()
+    else:
+        parent_media = media
 
     original_lat = media.lat
     original_lng = media.lng
@@ -278,60 +483,36 @@ async def patch_media(
     ):
         media.location = func.ST_SetSRID(func.ST_MakePoint(media.lng, media.lat), 4326)
 
+    video_detection_deleted = False
     if patch_data.detections is not None:
-        # build a set of new detection signatures (label + bbox) for matching
-        new_detection_map = {
-            (det.label, json.dumps(det.bbox, sort_keys=True)): det
-            for det in patch_data.detections
-        }
-
-        processed_signatures = set()
-
-        for existing_det in media.detections[:]:  # slice to avoid iteration issues
-            det_signature = (existing_det.label, json.dumps(existing_det.bbox, sort_keys=True))
-
-            if det_signature in new_detection_map:
-                new_det_data = new_detection_map[det_signature]
-                was_changed = False
-
-                if (
-                    new_det_data.area_sqm is not None
-                    and new_det_data.area_sqm != existing_det.area_sqm
-                ):
-                    existing_det.area_sqm = new_det_data.area_sqm
-                    was_changed = True
-
-                if was_changed:
-                    existing_det.confidence = 1.0  # human validation
-
-                processed_signatures.add(det_signature)
-            else:
-                media.detections.remove(existing_det)
-
-        for det_signature, new_det_data in new_detection_map.items():
-            if det_signature not in processed_signatures:
-                new_detection = Detection(
-                    media_id=media.id,
-                    label=new_det_data.label,
-                    confidence=1.0,
-                    bbox=new_det_data.bbox,
-                    area_sqm=new_det_data.area_sqm,
-                    is_manual=True,
-                )
-                media.detections.append(new_detection)
-
-    await db.commit()
-
-    await db.refresh(media)
+        if patch_data.item_type == "image":
+            _merge_image_detections(media, patch_data.detections)
+            _update_media_summary(
+                media,
+                len(media.detections),
+                max((detection.confidence for detection in media.detections), default=0),
+            )
+        else:
+            video_detection_deleted = await _merge_video_detections(
+                db, media, patch_data.detections
+            )
+            await _refresh_video_summary(db, parent_media)
 
     validation_log = create_status_change_log(
-        media_id=media.id,
-        status=media.status,
+        media_id=parent_media.id,
+        status=parent_media.status,
         detail="Detections or location validated by You",
         worker_name="You",
     )
     db.add(validation_log)
     await db.commit()
+    invalidate_map_stats_cache(str(current_user.id))
+    invalidate_stats_cache(str(current_user.id))
+
+    if video_detection_deleted:
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    await db.refresh(media)
 
     if patch_data.item_type == "image":
         return _serialize_media(media)

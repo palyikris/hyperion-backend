@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, case, and_, desc
+from sqlalchemy import select, func, case, and_, desc, false
 from sqlalchemy.orm import selectinload
 from geoalchemy2.functions import (
     ST_Intersects,
@@ -21,12 +21,20 @@ from app.models.db.MediaLog import MediaLog
 from app.models.db.Detection import Detection
 from app.models.map.MapResponse import MapLogsResponse, MapResponse, MapStatsResponse
 from collections import defaultdict
+from app.core.ttl_cache import prune_ttl_cache
 
 
 router = APIRouter()
 
 STATS_CACHE_TTL_SECONDS = 60
+STATS_CACHE_MAX_ENTRIES = 512
 _map_stats_cache: dict[tuple, tuple[float, dict]] = {}
+
+
+def invalidate_map_stats_cache(user_id: str) -> None:
+    for key in list(_map_stats_cache):
+        if key[0] == user_id:
+            del _map_stats_cache[key]
 
 
 @router.get(
@@ -71,10 +79,14 @@ async def get_map_data(
 
     if has_trash is not None:
         image_query = image_query.where(Media.has_trash == has_trash)
+        if not has_trash:
+            # Every video detection represents trash; there are no clean-frame
+            # records in this table.
+            video_query = video_query.where(false())
 
     if min_confidence is not None and min_confidence > 0:
         image_query = image_query.where(Media.confidence >= min_confidence)
-        video_query = video_query.where(VideoDetection.confidence >= min_confidence)
+        video_query = video_query.where(VideoDetection.confidence >= min_confidence / 100)
 
     image_result = await db.execute(image_query)
     image_records = image_result.scalars().all()
@@ -94,7 +106,7 @@ async def get_map_data(
             {
                 "id": str(v.id),
                 "media_id": str(v.media_id),
-                "filename": v.media.initial_metadata.get("filename"),
+                "filename": (v.media.initial_metadata or {}).get("filename"),
                 "status": v.media.status.value,
                 "worker_name": v.media.assigned_worker,
                 "lat": extract_coords(v)[0],
@@ -113,38 +125,36 @@ async def get_map_data(
             key=lambda x: x["timestamp_in_video"] if "timestamp_in_video" in x else 0
         )
 
-    return JSONResponse(
-        content={
-            "total": len(image_records) + len(video_records),
-            "items": [
-                {
-                    "id": str(m.id),
-                    "filename": m.initial_metadata.get("filename"),
-                    "status": m.status.value,
-                    "worker_name": m.assigned_worker,
-                    "lat": extract_coords(m)[0],
-                    "lng": extract_coords(m)[1],
-                    "altitude": m.altitude,
-                    "address": m.address,
-                    "image_url": m.hf_path,
-                    "has_trash": m.has_trash,
-                    "confidence": m.confidence,
-                    "detections": [
-                        {
-                            "label": d.label,
-                            "confidence": d.confidence,
-                            "bbox": d.bbox,
-                            "area_sqm": d.area_sqm,
-                        }
-                        for d in m.detections
-                    ],
-                    "failed_reason": m.failed_reason,
-                }
-                for m in image_records
-            ],
-            "video_detections": grouped_video_detections,
-        }
-    )
+    return {
+        "total": len(image_records) + len(video_records),
+        "items": [
+            {
+                "id": str(m.id),
+                "filename": (m.initial_metadata or {}).get("filename"),
+                "status": m.status.value,
+                "worker_name": m.assigned_worker,
+                "lat": extract_coords(m)[0],
+                "lng": extract_coords(m)[1],
+                "altitude": m.altitude,
+                "address": m.address,
+                "image_url": m.hf_path,
+                "has_trash": m.has_trash,
+                "confidence": m.confidence,
+                "detections": [
+                    {
+                        "label": d.label,
+                        "confidence": d.confidence,
+                        "bbox": d.bbox,
+                        "area_sqm": d.area_sqm,
+                    }
+                    for d in m.detections
+                ],
+                "failed_reason": m.failed_reason,
+            }
+            for m in image_records
+        ],
+        "video_detections": dict(grouped_video_detections),
+    }
 
 
 @router.get(
@@ -167,21 +177,22 @@ async def get_map_stats(
             detail="Invalid bounding box: min values must be <= max values.",
         )
 
-    # Cache key is scoped by user + normalized bbox/resolution, so repeated map views
+    # Cache key is scoped by user + exact bbox/resolution, so repeated map views
     # within a short interval can reuse the already computed cell stats.
     cache_key = (
         str(current_user.id),
-        round(min_lat, 6),
-        round(max_lat, 6),
-        round(min_lng, 6),
-        round(max_lng, 6),
-        round(resolution, 6),
+        min_lat,
+        max_lat,
+        min_lng,
+        max_lng,
+        resolution,
     )
 
     cached = _map_stats_cache.get(cache_key)
     now = monotonic()
     if cached and now - cached[0] <= STATS_CACHE_TTL_SECONDS:
         return cached[1]
+    _map_stats_cache.pop(cache_key, None)
 
     # Use ST_SnapToGrid for efficient grid cell bucketing with PostGIS
     # This snaps each point to a grid and extracts the cell coordinates
@@ -309,7 +320,11 @@ async def get_map_stats(
     }
 
     # Store in short-lived in-memory cache to reduce repeated aggregate scans.
+    now = monotonic()
     _map_stats_cache[cache_key] = (now, response_payload)
+    prune_ttl_cache(
+        _map_stats_cache, now, STATS_CACHE_TTL_SECONDS, STATS_CACHE_MAX_ENTRIES
+    )
     return response_payload
 
 

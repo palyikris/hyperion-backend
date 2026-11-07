@@ -30,6 +30,7 @@ async def test_get_map_data(auth_client, db_session):
     data = response.json()
     assert data["total"] >= 1
     assert data["items"][0]["lat"] == 47.0
+    assert "video_detections" in data
 
 
 @pytest.mark.asyncio

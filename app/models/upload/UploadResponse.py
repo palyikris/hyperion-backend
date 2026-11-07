@@ -1,5 +1,8 @@
 from pydantic import BaseModel
-from typing import List, Optional, Dict, Any
+from typing import List, Optional
+
+from app.models.vault.VaultResponse import VaultItem, VideoDetectionItem
+
 
 class UploadResponse(BaseModel):
     message: str
@@ -8,5 +11,5 @@ class UploadResponse(BaseModel):
 
 class RecentsResponse(BaseModel):
     total: int
-    image_items: List[Dict[str, Any]]
-    video_items: List[Dict[str, Any]]
+    image_items: List[VaultItem]
+    video_items: List[VideoDetectionItem]

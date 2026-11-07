@@ -23,6 +23,7 @@ class VaultItem(BaseModel):
 class VideoDetectionItem(BaseModel):
     id: str
     media_id: str
+    filename: Optional[str] = None
     lat: Optional[float] = None
     lng: Optional[float] = None
     altitude: Optional[float] = None

@@ -84,6 +84,22 @@ The application handles several background processes automatically on startup:
 2. Run database migrations:
    ```bash
    alembic upgrade head
+   ```
+
+## Tests
+
+Run isolated unit tests with `venv/bin/python -m pytest tests/unit -q`.
+The full suite (`venv/bin/python -m pytest -q`) also needs a disposable
+PostgreSQL database with PostGIS. Set `TEST_DATABASE_URL` explicitly, for example:
+
+```bash
+TEST_DATABASE_URL=postgresql+asyncpg://test_user:test_pass@localhost:5432/hyperion_test venv/bin/python -m pytest -q
+```
+
+The default database is `hyperion_test` on localhost. Its name must start with
+`test_` or end with `_test`. Tests recreate application tables only in this
+database and roll back each test, including commits issued by API handlers.
+The application `DATABASE_URL` is replaced with the test URL before imports.
 
 ## License
 
