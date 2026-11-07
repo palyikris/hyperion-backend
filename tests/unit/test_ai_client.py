@@ -1,3 +1,4 @@
+from unittest.mock import AsyncMock
 import asyncio
 import io
 from pathlib import Path
@@ -22,6 +23,7 @@ IMAGE_BYTES = make_image_bytes()
 
 @pytest.fixture(autouse=True)
 def ai_configuration(monkeypatch):
+    monkeypatch.setattr(ai_client.asyncio, "sleep", AsyncMock())
     monkeypatch.setattr(ai_client, "HF_REPO_ID", "test-owner/test-media")
     monkeypatch.setattr(ai_client, "HF_TOKEN", "test-token")
 

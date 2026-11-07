@@ -10,6 +10,7 @@ from openpyxl import load_workbook
 from pypdf import PdfReader
 
 from app.api.stats_utils.pdf import html_report
+from app.api.stats_utils.report_dates import ReportDateRange
 from app.api.stats_utils.report_manifest import (
     MANIFEST_COLUMNS, _build_hf_url, _get_translation, create_excel_file,
 )
@@ -153,7 +154,7 @@ async def test_report_rendering_keeps_event_loop_responsive(monkeypatch, report_
         monkeypatch.setattr(stats, "generate_manifest_data", AsyncMock(return_value=[]))
         monkeypatch.setattr(stats, "create_excel_file", blocking_render)
         coroutine = stats.get_cleanup_manifest_report(
-            days=7, language="en", db=None, current_user=SimpleNamespace(id="test-user")
+            date_range=ReportDateRange(date(2026, 1, 1), date(2026, 1, 7)), language="en", db=None, current_user=SimpleNamespace(id="test-user")
         )
     task = asyncio.create_task(coroutine)
     try:

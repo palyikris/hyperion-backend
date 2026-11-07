@@ -96,6 +96,7 @@ async def process_video_media(media_task) -> None:
         "hf_full_video_path"
     )
     local_video_path = None
+    delete_source_video = False
     frame_directory = None
     cap = None
     repo_id = os.getenv("HF_REPO_ID")
@@ -142,6 +143,7 @@ async def process_video_media(media_task) -> None:
                         media.id, MediaStatus.FAILED, detail="Duplicate detected"
                     ))
                     await session.commit()
+                    delete_source_video = True
                     await manager.send_status(
                         user_id, str(media_id), "FAILED",
                         failed_reason="Duplicate video detected.",
@@ -194,7 +196,7 @@ async def process_video_media(media_task) -> None:
                 all_detections.append(VideoDetection(
                     media_id=media_id,
                     timestamp_in_video=timestamp_sec,
-                    label=detection["label"],
+                    label="Trash" if detection["label"] == "rubbish" else detection["label"],
                     confidence=detection["confidence"],
                     bbox={
                         "x": x1 / width,
@@ -239,6 +241,7 @@ async def process_video_media(media_task) -> None:
             media.technical_metadata = {
                 **(media.technical_metadata or {}),
                 "hf_full_video_path": None,
+                "detections_count": len(all_detections),
                 "sampled_frames": sampled_frames,
                 "analyzed_frames": analyzed_frames,
                 "skipped_gps_frames": sampled_frames - analyzed_frames,
@@ -249,6 +252,7 @@ async def process_video_media(media_task) -> None:
             if media.assigned_worker:
                 await record_completed_task(session, media.assigned_worker)
             await session.commit()
+            delete_source_video = True
         await manager.send_status(user_id, str(media_id), "READY")
 
     except Exception as error:
@@ -268,7 +272,7 @@ async def process_video_media(media_task) -> None:
                     else "Internal processing error."
                 )
                 media.technical_metadata = {
-                    **(media.technical_metadata or {}), "hf_full_video_path": None,
+                    **(media.technical_metadata or {}), "hf_full_video_path": hf_full_video_path,
                 }
                 session.add(create_status_change_log(
                     media.id, MediaStatus.FAILED, detail=media.failed_reason
@@ -292,7 +296,7 @@ async def process_video_media(media_task) -> None:
             await asyncio.to_thread(
                 cleanup_temp_files, [local_video_path, f"{local_video_path}.srt"]
             )
-        if hf_full_video_path:
+        if hf_full_video_path and delete_source_video:
             try:
                 await asyncio.to_thread(delete_video_from_hf, hf_full_video_path)
             except Exception:

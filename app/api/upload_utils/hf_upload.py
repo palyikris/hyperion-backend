@@ -1,7 +1,7 @@
 import os
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import update, select
+from sqlalchemy import update, select, or_, and_
 from huggingface_hub import HfApi, CommitOperationAdd
 from app.database import AsyncSessionLocal
 from app.api.medialog_utils.media_log_utils import create_status_change_log
@@ -77,6 +77,34 @@ async def delete_from_hf(hf_path: str, media_id: uuid.UUID) -> bool:
 
 
 async def process_hf_upload(files_data: list[tuple], user_id: str):
+    # Always release staged files, including duplicate-only batches and setup failures.
+    try:
+        await _process_hf_upload(files_data, user_id)
+    except Exception as error:
+        reason = "Server encountered an issue while saving your files to secure storage."
+        failed_ids = []
+        async with AsyncSessionLocal() as session:
+            for media_id, *_ in files_data:
+                result = await session.execute(
+                    update(Media)
+                    .where(Media.id == media_id, Media.status == MediaStatus.PENDING)
+                    .values(status=MediaStatus.FAILED, failed_reason=reason)
+                    .returning(Media.id)
+                )
+                if result.scalar_one_or_none() is not None:
+                    failed_ids.append(media_id)
+            await session.commit()
+        for media_id in failed_ids:
+            await manager.send_status(user_id, str(media_id), "FAILED", failed_reason=reason)
+        print(f"Batch upload failed: {error}")
+    finally:
+        cleanup_temp_files([
+            path for _, _, content_path, thumbnail_path in files_data
+            for path in (content_path, thumbnail_path)
+        ])
+
+
+async def _process_hf_upload(files_data: list[tuple], user_id: str):
     """
     Process and upload files to Hugging Face.
     Checks for duplicates before uploading to avoid wasted storage.
@@ -85,155 +113,129 @@ async def process_hf_upload(files_data: list[tuple], user_id: str):
         files_data: List of tuples containing (media_id, filename, content_temp_path, thumbnail_temp_path)
         user_id: The ID of the user uploading the files
     """
-    temp_files_to_cleanup = [
-        path
-        for _, _, content_path, thumbnail_path in files_data
-        for path in (content_path, thumbnail_path)
-    ]
+    api = HfApi(token=HF_TOKEN)
+    date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
-    try:
-        if not HF_REPO_ID:
-            raise ValueError("HF_REPO_ID environment variable is not set")
+    if not HF_REPO_ID:
+        raise ValueError("HF_REPO_ID environment variable is not set")
 
-        api = HfApi(token=HF_TOKEN)
-        date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        operations = []
-        media_ids = []
+    operations = []
+    media_ids = []
+    duplicate_updates = []
 
-        async with AsyncSessionLocal() as session:
-            for m_id, filename, content_path, thumbnail_path in files_data:
-                # first duplicate check for name
-                duplicate_query = (
-                    select(Media)
-                    .where(
-                        Media.id != m_id,
-                        Media.status != MediaStatus.FAILED,
-                        Media.initial_metadata["filename"].as_string() == filename,
-                        Media.uploader_id == user_id,
-                    )
-                    .limit(1)
+    async with AsyncSessionLocal() as session:
+        for m_id, filename, content_path, thumbnail_path in files_data:
+            media = await session.execute(select(Media).where(Media.id == m_id))
+            current_task = media.scalar_one_or_none()
+            if not current_task:
+                continue
+            content_hash = (current_task.initial_metadata or {}).get("sha256")
+            # A filename is not evidence of duplicate content. Only compare earlier
+            # records so identical images in one batch cannot reject each other.
+            duplicate_query = (
+                select(Media)
+                .where(
+                    Media.id != m_id,
+                    Media.status != MediaStatus.FAILED,
+                    Media.initial_metadata["sha256"].as_string() == content_hash,
+                    or_(
+                        Media.created_at < current_task.created_at,
+                        and_(Media.created_at == current_task.created_at, Media.id < m_id),
+                    ),
+                    Media.uploader_id == user_id,
                 )
+                .limit(1)
+            )
+            duplicate = None
+            if content_hash:
                 dup_result = await session.execute(duplicate_query)
                 duplicate = dup_result.scalar_one_or_none()
 
-                if duplicate:
-                    original_name = (duplicate.initial_metadata or {}).get(
-                        "filename", "Unknown"
-                    )
-                    original_date = duplicate.created_at.strftime("%Y-%m-%d %H:%M")
-                    duplicate_reason = f"Image is a duplicate of image {original_name[0:5]}... uploaded at {original_date}"
+            if duplicate:
+                original_name = (duplicate.initial_metadata or {}).get(
+                    "filename", "Unknown"
+                )
+                original_date = duplicate.created_at.strftime("%Y-%m-%d %H:%M")
+                duplicate_reason = f"Image is a duplicate of image {original_name[0:5]}... uploaded at {original_date}"
 
-                    media = await session.execute(
-                        select(Media).where(Media.id == m_id)
-                    )
-                    current_task = media.scalar_one_or_none()
+                if current_task:
+                    current_task.status = MediaStatus.FAILED
+                    current_task.failed_reason = duplicate_reason
+                    current_task.original_media_id = duplicate.id
+                    current_task.hf_path = duplicate.hf_path
 
-                    if current_task:
-                        current_task.status = MediaStatus.FAILED
-                        current_task.failed_reason = duplicate_reason
-                        current_task.original_media_id = duplicate.id
-                        current_task.hf_path = duplicate.hf_path
+                    # copy data from original
+                    if duplicate.lat is not None and duplicate.lng is not None:
+                        current_task.lat = duplicate.lat
+                        current_task.lng = duplicate.lng
+                        current_task.location = duplicate.location
+                        current_task.altitude = duplicate.altitude
+                        current_task.address = duplicate.address
 
-                        # copy data from original
-                        if duplicate.lat is not None and duplicate.lng is not None:
-                            current_task.lat = duplicate.lat
-                            current_task.lng = duplicate.lng
-                            current_task.location = duplicate.location
-                            current_task.altitude = duplicate.altitude
-                            current_task.address = duplicate.address
+                    current_task.has_trash = duplicate.has_trash
+                    current_task.confidence = duplicate.confidence
+                    current_task.technical_metadata = duplicate.technical_metadata
 
-                        current_task.has_trash = duplicate.has_trash
-                        current_task.confidence = duplicate.confidence
-                        current_task.technical_metadata = duplicate.technical_metadata
-
-                        session.add(
-                            create_status_change_log(
-                                m_id,
-                                MediaStatus.FAILED,
-                                detail=f"Duplicate detected: {original_name[0:5]}... (uploaded {original_date}). Using original image data.",
-                            )
-                        )
-
-                        await manager.send_status(
-                            user_id,
-                            str(m_id),
-                            "FAILED",
-                            failed_reason=duplicate_reason,
-                        )
-                else:
-                    full_path = f"media/{user_id}/{date_str}/{m_id}_{filename}"
-                    thumb_path = (
-                        f"media/{user_id}/{date_str}/{m_id}_thumbnail_{filename}"
-                    )
-
-                    operations.append(
-                        CommitOperationAdd(
-                            path_in_repo=full_path, path_or_fileobj=content_path
+                    session.add(
+                        create_status_change_log(
+                            m_id,
+                            MediaStatus.FAILED,
+                            detail=f"Duplicate detected: {original_name[0:5]}... (uploaded {original_date}). Using original image data.",
                         )
                     )
-                    operations.append(
-                        CommitOperationAdd(
-                            path_in_repo=thumb_path, path_or_fileobj=thumbnail_path
-                        )
-                    )
-                    media_ids.append((m_id, thumb_path))
 
+                    duplicate_updates.append((m_id, duplicate_reason))
+            else:
+                full_path = f"media/{user_id}/{date_str}/{m_id}_{filename}"
+                thumb_path = f"media/{user_id}/{date_str}/{m_id}_thumbnail_{filename}"
+
+                operations.append(
+                    CommitOperationAdd(
+                        path_in_repo=full_path, path_or_fileobj=content_path
+                    )
+                )
+                operations.append(
+                    CommitOperationAdd(
+                        path_in_repo=thumb_path, path_or_fileobj=thumbnail_path
+                    )
+                )
+                media_ids.append((m_id, thumb_path))
+
+        await session.commit()
+
+    for m_id, duplicate_reason in duplicate_updates:
+        await manager.send_status(
+            user_id, str(m_id), "FAILED", failed_reason=duplicate_reason
+        )
+
+    # upload only non-duplicate files to HF
+    if operations:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None,
+            lambda: api.create_commit(
+                repo_id=HF_REPO_ID or "",
+                repo_type="dataset",
+                operations=operations,
+                commit_message=f"Batch upload {len(operations)} files for user {user_id}",
+            ),
+        )
+
+        async with AsyncSessionLocal() as session:
+            for m_id, hf_path in media_ids:
+                await session.execute(
+                    update(Media)
+                    .where(Media.id == m_id)
+                    .values(status=MediaStatus.UPLOADED, hf_path=hf_path)
+                )
+                session.add(create_status_change_log(m_id, MediaStatus.UPLOADED))
             await session.commit()
 
-        # upload only non-duplicate files to HF
-        if operations:
-            try:
-                loop = asyncio.get_event_loop()
-                await loop.run_in_executor(
-                    None,
-                    lambda: api.create_commit(
-                        repo_id=HF_REPO_ID or "",
-                        repo_type="dataset",
-                        operations=operations,
-                        commit_message=f"Batch upload {len(operations)} files for user {user_id}",
-                    ),
-                )
+        for m_id, hf_path in media_ids:
+            await manager.send_status(user_id, str(m_id), "UPLOADED", img_url=hf_path)
 
-                async with AsyncSessionLocal() as session:
-                    for m_id, hf_path in media_ids:
-                        await session.execute(
-                            update(Media)
-                            .where(Media.id == m_id)
-                            .values(status=MediaStatus.UPLOADED, hf_path=hf_path)
-                        )
-                        session.add(
-                            create_status_change_log(m_id, MediaStatus.UPLOADED)
-                        )
-                        await manager.send_status(
-                            user_id, str(m_id), "UPLOADED", img_url=hf_path
-                        )
-
-                    await session.commit()
-
-                async with worker_signal:
-                    worker_signal.notify_all()
-
-            except Exception as e:
-                async with AsyncSessionLocal() as session:
-                    for m_id, _ in media_ids:
-                        await session.execute(
-                            update(Media)
-                            .where(Media.id == m_id)
-                            .values(
-                                status=MediaStatus.FAILED,
-                                failed_reason="Server encountered an issue while saving your files to secure storage.",
-                            )
-                        )
-                        await manager.send_status(
-                            user_id,
-                            str(m_id),
-                            "FAILED",
-                            failed_reason="Server encountered an issue while saving your files to secure storage.",
-                        )
-                    await session.commit()
-                print(f"Batch upload failed: {e}")
-    finally:
-        cleanup_temp_files(temp_files_to_cleanup)
+        async with worker_signal:
+            worker_signal.notify_all()
 
 
 async def upload_video_frames_to_hf(

@@ -233,7 +233,7 @@
     <div class="meta-strip">
         <div class="meta-item">Report ID: {{ generated_at }}</div>
         <span style="margin: 0 1rem;"></span>
-        <div class="meta-item">Horizon: {{ days_window }} Days</div>
+        <div class="meta-item">{% if start_date and end_date %}Report period: {{ start_date }} - {{ end_date }} (UTC){% else %}Horizon: {{ days_window }} Days{% endif %}</div>
     </div>
 
     <div class="content">
@@ -253,7 +253,7 @@
                 </td>
             </tr>
         </table>
-        <p>The daily trend covers the selected period. Other metrics cover all upload history.</p>
+        <p>{% if start_date and end_date %}All metrics use media uploaded within the selected report dates (UTC).{% else %}The daily trend covers the selected period. Other metrics cover all upload history.{% endif %}</p>
         <p>High-confidence locations: {{ high_confidence_media_count }}</p>
 
         <div class="section-header">

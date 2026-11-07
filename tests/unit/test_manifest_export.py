@@ -59,7 +59,9 @@ async def test_manifest_endpoint_downloads_readable_workbook(language, has_detec
         base_url="https://test",
     ) as client:
         response = await client.get(
-            "/api/stats/reports/manifest", params={"days": 7, "language": language}
+            "/api/stats/reports/manifest", params={
+                "start_date": "2026-01-01", "end_date": "2026-12-31", "language": language,
+            }
         )
 
     assert response.status_code == 200, response.text

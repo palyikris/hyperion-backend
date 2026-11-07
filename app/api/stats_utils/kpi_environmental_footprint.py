@@ -7,6 +7,7 @@ of the environmental monitoring effort.
 """
 
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.api.stats_utils.report_dates import ReportDateRange, media_date_filters
 from sqlalchemy import select, func
 
 from app.models.db.Media import Media
@@ -17,7 +18,7 @@ from app.models.stats import EnvironmentalFootprint
 
 
 async def get_environmental_footprint(
-    db: AsyncSession, user_id: str
+    db: AsyncSession, user_id: str, date_range: ReportDateRange | None = None
 ) -> EnvironmentalFootprint:
     """
     Calculates the cumulative total area of detected trash and detection count.
@@ -42,7 +43,7 @@ async def get_environmental_footprint(
             func.count(Detection.id).label("total_detections"),
         )
         .join(Media, Detection.media_id == Media.id)
-        .where(Media.uploader_id == user_id, Media.status == MediaStatus.READY)
+        .where(Media.uploader_id == user_id, *media_date_filters(date_range), Media.status == MediaStatus.READY)
     )
 
     # Query for VideoDetection
@@ -52,7 +53,7 @@ async def get_environmental_footprint(
             func.count(VideoDetection.id).label("total_detections"),
         )
         .join(Media, VideoDetection.media_id == Media.id)
-        .where(Media.uploader_id == user_id, Media.status == MediaStatus.READY)
+        .where(Media.uploader_id == user_id, *media_date_filters(date_range), Media.status == MediaStatus.READY)
     )
 
     detection_result = await db.execute(detection_query)

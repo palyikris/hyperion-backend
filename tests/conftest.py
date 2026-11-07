@@ -22,7 +22,10 @@ from app.api.dashboard_utils import ux
 
 @pytest_asyncio.fixture(scope="session", autouse=True)
 async def setup_database():
-    """Runs once per test session to create and drop tables."""
+    """Create a private schema in an explicitly selected disposable database."""
+    if not os.getenv("TEST_DATABASE_URL"):
+        pytest.skip("Set TEST_DATABASE_URL to run PostgreSQL/PostGIS integration tests")
+    schema = "hyperion_test_" + uuid.uuid4().hex
 
     database_name = make_url(TEST_DATABASE_URL).database or ""
     if not (database_name.startswith("test_") or database_name.endswith("_test")):
@@ -35,24 +38,28 @@ async def setup_database():
     engine = create_async_engine(TEST_DATABASE_URL, poolclass=NullPool)
     async with engine.begin() as conn:
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS postgis;"))
-        await conn.run_sync(Base.metadata.drop_all)
+        await conn.execute(text(f'CREATE SCHEMA "{schema}"'))
+        await conn.execute(text(f'SET search_path TO "{schema}", public'))
         await conn.run_sync(Base.metadata.create_all)
     await engine.dispose()
 
-    yield
+    yield schema
 
     # Create a temporary engine just for teardown
     engine = create_async_engine(TEST_DATABASE_URL, poolclass=NullPool)
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
+        await conn.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
     await engine.dispose()
 
 
 @pytest_asyncio.fixture
-async def db_session():
+async def db_session(setup_database):
     """Provides a fresh database session for a single test."""
     # Creating the engine inside the fixture ensures it binds to the correct event loop!
-    engine = create_async_engine(TEST_DATABASE_URL, poolclass=NullPool)
+    engine = create_async_engine(
+        TEST_DATABASE_URL, poolclass=NullPool,
+        connect_args={"server_settings": {"search_path": f"{setup_database},public"}},
+    )
     try:
         async with engine.connect() as connection:
             transaction = await connection.begin()

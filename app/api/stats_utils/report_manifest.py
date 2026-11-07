@@ -17,6 +17,7 @@ from huggingface_hub import hf_hub_url
 
 import pandas as pd
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.api.stats_utils.report_dates import ReportDateRange, media_date_filters
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
@@ -69,7 +70,7 @@ def _build_hf_url(hf_path: str | None, uploader_id: str, media_id: str) -> str:
 
 
 async def generate_manifest_data(
-    db: AsyncSession, user_id: str, days: int = 30
+    db: AsyncSession, user_id: str, days: int = 30, date_range: ReportDateRange | None = None
 ) -> list[dict]:
     """
     Generate flattened data for the Geospatial Cleanup Manifest.
@@ -96,6 +97,9 @@ async def generate_manifest_data(
     # Calculate date threshold
     cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
 
+    time_filters = (media_date_filters(date_range) if date_range is not None
+                    else (Media.created_at >= cutoff_date,))
+
     # Query media with eager-loaded detections
     query = (
         select(Media)
@@ -105,7 +109,7 @@ async def generate_manifest_data(
         )  # Eager load detections
         .where(Media.uploader_id == user_id)       # Security: User-scoped
         .where(Media.status == MediaStatus.READY)  # Only successfully processed
-        .where(Media.created_at >= cutoff_date)    # Time filter
+        .where(*time_filters)    # Time filter
         .order_by(Media.created_at.desc())         # Most recent first
     )
 

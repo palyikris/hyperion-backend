@@ -30,21 +30,24 @@ from app.api.stats_utils import (
     create_pdf_report,
 )
 
+from app.api.stats_utils.report_dates import ReportDateRange, get_report_date_range
+
 router = APIRouter()
 
 
 async def _collect_statistics(
-    db: AsyncSession, user_id: str, days: int
+    db: AsyncSession, user_id: str, days: int, date_range: ReportDateRange | None = None
 ) -> StatsSummaryResponse:
     # AsyncSession owns one transaction/connection and must not be shared by
     # concurrent tasks. Keep these queries sequential on the request session.
+    range_params = {"date_range": date_range} if date_range is not None else {}
     return StatsSummaryResponse(
-        trash_composition=await get_trash_composition(db, user_id),
-        environmental_footprint=await get_environmental_footprint(db, user_id),
-        ai_fleet_efficiency=await get_ai_fleet_efficiency(db, user_id),
-        temporal_trends=await get_temporal_trends(db, user_id, days),
-        mean_time_to_process=await get_mean_time_to_process(db, user_id),
-        hotspot_density=await get_hotspot_density(db, user_id),
+        trash_composition=await get_trash_composition(db, user_id, **range_params),
+        environmental_footprint=await get_environmental_footprint(db, user_id, **range_params),
+        ai_fleet_efficiency=await get_ai_fleet_efficiency(db, user_id, **range_params),
+        temporal_trends=await get_temporal_trends(db, user_id, days, **range_params),
+        mean_time_to_process=await get_mean_time_to_process(db, user_id, **range_params),
+        hotspot_density=await get_hotspot_density(db, user_id, **range_params),
         days_window=days,
     )
 
@@ -355,12 +358,7 @@ async def get_fun_facts_endpoint(
     status_code=status.HTTP_200_OK,
 )
 async def get_cleanup_manifest_report(
-    days: int = Query(
-        default=30,
-        ge=1,
-        le=365,
-        description="Time window in days for the report (1-365)",
-    ),
+    date_range: ReportDateRange = Depends(get_report_date_range),
     language: str = Query(
         default="en",
         regex="^(en|hu)$",
@@ -386,7 +384,7 @@ async def get_cleanup_manifest_report(
         Requires valid session cookie (access_token)
 
     Query Parameters:
-        - days (int, default=30): Number of days to look back from now (1-365)
+        - start_date, end_date (required): Inclusive upload dates (YYYY-MM-DD, UTC)
         - language (str, default="en"): Report language ("en" for English, "hu" for Hungarian)
 
     Security:
@@ -411,7 +409,7 @@ async def get_cleanup_manifest_report(
         - Supports large datasets through efficient pandas processing
     """
     # Generate flattened data (one row per detection)
-    manifest_data = await generate_manifest_data(db, current_user.id, days)
+    manifest_data = await generate_manifest_data(db, current_user.id, date_range=date_range)
 
     # Convert to Excel file in memory with specified language
     excel_buffer = await asyncio.to_thread(
@@ -424,7 +422,7 @@ async def get_cleanup_manifest_report(
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     manifest_label = _get_translation(language, "Cleanup Manifest").replace(" ", "_")
-    filename = f"Hyperion_{manifest_label}_{timestamp}.xlsx"
+    filename = f"Hyperion_{manifest_label}_{date_range.start_date}_{date_range.end_date}_{timestamp}.xlsx"
 
     # Return as downloadable Excel file
     return Response(
@@ -448,12 +446,7 @@ async def get_cleanup_manifest_report(
     status_code=status.HTTP_200_OK,
 )
 async def get_statistics_pdf_report(
-    days: int = Query(
-        default=7,
-        ge=1,
-        le=365,
-        description="Time window in days for temporal data (1-365)",
-    ),
+    date_range: ReportDateRange = Depends(get_report_date_range),
     language: str = Query(
         default="en",
         regex="^(en|hu)$",
@@ -473,8 +466,8 @@ async def get_statistics_pdf_report(
         Requires valid session cookie (access_token)
 
     Query Parameters:
-        - days (int, default=7): Time window for temporal data (1-365 days)
-          Only affects Temporal Trends KPI. Other KPIs use all-time data.
+        - start_date, end_date (required): Inclusive upload dates (YYYY-MM-DD, UTC).
+          Applies to every KPI in the report.
         - language (str, default="en"): Report language ("en" or "hu")
 
     Report Contents:
@@ -515,9 +508,10 @@ async def get_statistics_pdf_report(
     # ------------------------------------------------------------------
     # FETCH ALL KPIs (same collector as the summary endpoint)
     # ------------------------------------------------------------------
+    days = date_range.days
     user_id = current_user.id
 
-    collected = await _collect_statistics(db, user_id, days)
+    collected = await _collect_statistics(db, user_id, days, date_range)
     trash_composition = collected.trash_composition
     environmental_footprint = collected.environmental_footprint
     ai_fleet_efficiency = collected.ai_fleet_efficiency
@@ -583,6 +577,8 @@ async def get_statistics_pdf_report(
         "mean_time_to_process": mttp_dict,
         "hotspot_density": hd_dict,
         "days_window": days,
+        "start_date": date_range.start_date.isoformat(),
+        "end_date": date_range.end_date.isoformat(),
     }
 
     # ------------------------------------------------------------------
@@ -601,7 +597,7 @@ async def get_statistics_pdf_report(
         if language == "en"
         else "Hyperion_Statisztikai_Jelentés"
     )
-    filename = f"{report_label}_{timestamp}.pdf"
+    filename = f"{report_label}_{date_range.start_date}_{date_range.end_date}_{timestamp}.pdf"
 
     # ------------------------------------------------------------------
     # RETURN PDF AS DOWNLOADABLE RESPONSE

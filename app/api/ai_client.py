@@ -13,12 +13,16 @@ HF_API_URL = "https://palyikris-hyperion-model.hf.space/detect"
 THUMBNAIL_TOKEN = "_thumbnail_"
 HF_TOKEN = os.getenv("HF_TOKEN")
 HF_REPO_ID = os.getenv("HF_REPO_ID")
+MAX_ATTEMPTS = 3
 
 logger = logging.getLogger(__name__)
 
 
 class AIInferenceError(RuntimeError):
     """A failed inference must not be mistaken for a successful empty result."""
+
+
+DetectionError = AIInferenceError
 
 
 class AIDetection(BaseModel):
@@ -82,13 +86,24 @@ async def get_real_detections(image_path: str) -> list[dict]:
                 image_content = image_response.content
 
             image_size = await asyncio.to_thread(_image_size, image_content)
-            response = await client.post(
-                HF_API_URL,
-                headers=headers,
-                files={"file": (os.path.basename(image_path), image_content)},
-            )
-
-            response.raise_for_status()
+            for attempt in range(MAX_ATTEMPTS):
+                try:
+                    response = await client.post(
+                        HF_API_URL,
+                        headers=headers,
+                        files={"file": (os.path.basename(image_path), image_content)},
+                    )
+                    response.raise_for_status()
+                    break
+                except (httpx.TransportError, httpx.HTTPStatusError) as error:
+                    retryable = isinstance(error, httpx.TransportError) or (
+                        error.response.status_code in (408, 429)
+                        or error.response.status_code >= 500
+                    )
+                    if not retryable or attempt == MAX_ATTEMPTS - 1:
+                        raise
+                    logger.warning("AI request failed; retrying (%s/%s)", attempt + 1, MAX_ATTEMPTS)
+                    await asyncio.sleep(2 ** attempt)
     except httpx.HTTPError as error:
         logger.warning("AI analysis request failed (%s)", type(error).__name__)
         raise AIInferenceError(
@@ -99,9 +114,10 @@ async def get_real_detections(image_path: str) -> list[dict]:
         raise AIInferenceError("Unable to read the image for AI analysis.") from error
 
     try:
-        result = AIResponse.model_validate(
-            response.json(), context={"image_size": image_size}
-        )
+        payload = response.json()
+        if isinstance(payload, dict) and "error" in payload:
+            raise ValueError("AI model reported an error")
+        result = AIResponse.model_validate(payload, context={"image_size": image_size})
     except ValueError as error:
         logger.warning("AI analysis service returned an invalid response")
         raise AIInferenceError(

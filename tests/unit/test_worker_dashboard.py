@@ -18,7 +18,10 @@ async def test_worker_tasks_are_owner_scoped_and_loaded_in_one_batch(monkeypatch
     table = Table("media", MetaData(), Column("id", Uuid, primary_key=True),
                   Column("uploader_id", String), Column("assigned_worker", String),
                   Column("status", Enum(MediaStatus)), Column("created_at", DateTime))
-    table.create(engine)
+    logs = Table("media_task_logs", table.metadata, Column("media_id", Uuid),
+                 Column("action", String), Column("message", String),
+                 Column("worker_name", String), Column("timestamp", DateTime))
+    table.metadata.create_all(engine)
     now = datetime.now(timezone.utc)
     own_id = uuid.uuid4()
     workers = [SimpleNamespace(name=f"worker-{index}", last_ping=now, status="Working",
@@ -44,7 +47,7 @@ async def test_worker_tasks_are_owner_scoped_and_loaded_in_one_batch(monkeypatch
                     return connection.execute(statement)
 
             result = await ai_workers.get_worker_status(db=Session(), current_user=SimpleNamespace(id="owner"))
-        assert len(statements) == 2
+        assert len(statements) == 3
         assert result["nodes"][0]["current_task_id"] == str(own_id)
         assert result["nodes"][0]["current_task_status"] == "PROCESSING"
         assert all(node["current_task_id"] is None for node in result["nodes"][1:])

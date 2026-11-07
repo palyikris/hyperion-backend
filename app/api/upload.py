@@ -19,6 +19,7 @@ from app.models.upload.MediaStatus import MediaStatus
 from app.api.upload_utils.conn_manager import manager
 from PIL import Image, UnidentifiedImageError
 import io
+import hashlib
 import uuid
 import asyncio
 import logging
@@ -261,9 +262,19 @@ async def batch_upload(
             media_id = uuid.uuid4()
 
             try:
-                width, height, content_path, thumbnail_path = await asyncio.to_thread(
+                # Track output paths before starting the thread, including cancellation.
+                content_path = os.path.join(tempfile.gettempdir(), f"{media_id}_content")
+                thumbnail_path = os.path.join(tempfile.gettempdir(), f"{media_id}_thumbnail")
+                prepared_temp_files.extend([content_path, thumbnail_path])
+                processing = asyncio.create_task(asyncio.to_thread(
                     _process_image_to_temp, content, media_id
-                )
+                ))
+                try:
+                    width, height, content_path, thumbnail_path = await asyncio.shield(processing)
+                except asyncio.CancelledError:
+                    await asyncio.gather(processing, return_exceptions=True)
+                    raise
+                content_hash = hashlib.sha256(content).hexdigest()
             except UnidentifiedImageError as error:
                 raise HTTPException(
                     status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
@@ -277,8 +288,7 @@ async def batch_upload(
             finally:
                 del content
 
-            prepared_temp_files.extend([content_path, thumbnail_path])
-            filename = file.filename or f"{media_id}.jpg"
+            filename = (file.filename or f"{media_id}.jpg").replace("\\", "/").rsplit("/", 1)[-1]
             new_media = Media(
                 id=media_id,
                 uploader_id=current_user.id,
@@ -288,6 +298,7 @@ async def batch_upload(
                     "size": os.path.getsize(content_path),
                     "width": width,
                     "height": height,
+                    "sha256": content_hash,
                 },
             )
 
@@ -312,7 +323,7 @@ async def batch_upload(
                 status=MediaStatus.PENDING.value,
                 worker=None,
             )
-    except Exception:
+    except BaseException:
         await db.rollback()
         cleanup_temp_files(prepared_temp_files)
         raise

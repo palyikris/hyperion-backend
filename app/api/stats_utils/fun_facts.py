@@ -4,10 +4,10 @@ Generates entertaining, user-specific trash report insights.
 """
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, desc
+from sqlalchemy import select, func, desc, union_all
 
 from app.models.stats import FunFact
-from app.models.db.Media import Media
+from app.models.db.Media import Media, MediaType
 from app.models.db.Detection import Detection
 from app.models.db.VideoDetection import VideoDetection
 from app.models.upload.MediaStatus import MediaStatus
@@ -101,9 +101,13 @@ async def get_fun_facts(
     # --- FACT 1: Most Active Worker (Titan Affinity) ---
     worker_q = (
         select(Media.assigned_worker, func.count(Media.id))
-        .where(Media.uploader_id == user_id, Media.assigned_worker.isnot(None))
+        .where(
+            Media.uploader_id == user_id,
+            Media.assigned_worker.isnot(None),
+            Media.status.in_([MediaStatus.READY, MediaStatus.FAILED]),
+        )
         .group_by(Media.assigned_worker)
-        .order_by(desc(func.count(Media.id)))
+        .order_by(desc(func.count(Media.id)), Media.assigned_worker)
         .limit(1)
     )
     worker_res = (await db.execute(worker_q)).first()
@@ -122,12 +126,12 @@ async def get_fun_facts(
     area_detection_q = (
         select(func.coalesce(func.sum(Detection.area_sqm), 0))
         .join(Media)
-        .where(Media.uploader_id == user_id)
+        .where(Media.uploader_id == user_id, Media.status == MediaStatus.READY)
     )
     area_video_detection_q = (
         select(func.coalesce(func.sum(VideoDetection.area_sqm), 0))
         .join(Media)
-        .where(Media.uploader_id == user_id)
+        .where(Media.uploader_id == user_id, Media.status == MediaStatus.READY)
     )
     total_area_detection = (await db.execute(area_detection_q)).scalar() or 0
     total_area_video_detection = (
@@ -135,7 +139,8 @@ async def get_fun_facts(
     ).scalar() or 0
     total_area = total_area_detection + total_area_video_detection
     if total_area > 0:
-        screens = int(total_area / 0.007)
+        # Remove floating-point noise before truncating (7 m² is 1000 screens).
+        screens = int(round(total_area / 0.007, 9))
         if screens > 0:
             results.append(
                 FunFact(
@@ -150,7 +155,7 @@ async def get_fun_facts(
     label_detection_q = (
         select(Detection.label, func.count(Detection.id))
         .join(Media)
-        .where(Media.uploader_id == user_id)
+        .where(Media.uploader_id == user_id, Media.status == MediaStatus.READY)
         .group_by(Detection.label)
     )
     detection_labels = (await db.execute(label_detection_q)).all()
@@ -159,7 +164,7 @@ async def get_fun_facts(
     label_video_detection_q = (
         select(VideoDetection.label, func.count(VideoDetection.id))
         .join(Media)
-        .where(Media.uploader_id == user_id)
+        .where(Media.uploader_id == user_id, Media.status == MediaStatus.READY)
         .group_by(VideoDetection.label)
     )
     video_detection_labels = (await db.execute(label_video_detection_q)).all()
@@ -174,7 +179,7 @@ async def get_fun_facts(
         label_counter[label] += count
 
     if label_counter:
-        dominant_label, _ = label_counter.most_common(1)[0]
+        dominant_label = min(label_counter, key=lambda label: (-label_counter[label], label))
         results.append(
             FunFact(
                 title=FUN_FACT_TEMPLATES["specialist"][l]["title"],
@@ -186,14 +191,21 @@ async def get_fun_facts(
         )
 
     # --- FACT 4: Northernmost Location (Arctic Explorer) ---
-    northernmost_q = (
-        select(Media.lat)
-        .where(Media.uploader_id == user_id, Media.lat.isnot(None))
-        .order_by(desc(Media.lat))
-        .limit(1)
-    )
+    find_locations = union_all(
+        select(Media.lat.label("lat")).where(
+            Media.uploader_id == user_id,
+            Media.status == MediaStatus.READY,
+            Media.media_type == MediaType.IMAGE,
+            Media.has_trash.is_(True),
+            Media.lat.isnot(None),
+        ),
+        select(VideoDetection.lat.label("lat"))
+        .join(Media, VideoDetection.media_id == Media.id)
+        .where(Media.uploader_id == user_id, Media.status == MediaStatus.READY),
+    ).subquery()
+    northernmost_q = select(func.max(find_locations.c.lat))
     northernmost_res = (await db.execute(northernmost_q)).scalar()
-    if northernmost_res:
+    if northernmost_res is not None:
         results.append(
             FunFact(
                 title=FUN_FACT_TEMPLATES["northernmost"][l]["title"],
@@ -208,13 +220,16 @@ async def get_fun_facts(
     success_q = select(func.count(Media.id)).where(
         Media.uploader_id == user_id, Media.status == MediaStatus.READY
     )
-    total_q = select(func.count(Media.id)).where(Media.uploader_id == user_id)
+    total_q = select(func.count(Media.id)).where(
+        Media.uploader_id == user_id,
+        Media.status.in_([MediaStatus.READY, MediaStatus.FAILED]),
+    )
 
     success_count = (await db.execute(success_q)).scalar() or 0
     total_count = (await db.execute(total_q)).scalar() or 0
 
     if total_count > 0:
-        success_rate = int((success_count / total_count) * 100)
+        success_rate = success_count * 100 // total_count
         results.append(
             FunFact(
                 title=FUN_FACT_TEMPLATES["efficiency"][l]["title"],

@@ -7,16 +7,18 @@ of environmental waste are most prevalent in their scanned areas.
 """
 
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.api.stats_utils.report_dates import ReportDateRange, media_date_filters
 from sqlalchemy import select, func
 
 from app.models.db.Media import Media
 from app.models.db.Detection import Detection
 from app.models.db.VideoDetection import VideoDetection
 from app.models.stats import TrashCompositionItem
+from app.models.upload.MediaStatus import MediaStatus
 
 
 async def get_trash_composition(
-    db: AsyncSession, user_id: str
+    db: AsyncSession, user_id: str, date_range: ReportDateRange | None = None
 ) -> list[TrashCompositionItem]:
     """
     Calculates the percentage distribution of identified trash types.
@@ -38,7 +40,7 @@ async def get_trash_composition(
     detection_query = (
         select(Detection.label, func.count(Detection.id).label("count"))
         .join(Media, Detection.media_id == Media.id)
-        .where(Media.uploader_id == user_id)
+        .where(Media.uploader_id == user_id, *media_date_filters(date_range), Media.status == MediaStatus.READY)
         .group_by(Detection.label)
     )
     detection_result = await db.execute(detection_query)
@@ -48,7 +50,7 @@ async def get_trash_composition(
     video_query = (
         select(VideoDetection.label, func.count(VideoDetection.id).label("count"))
         .join(Media, VideoDetection.media_id == Media.id)
-        .where(Media.uploader_id == user_id)
+        .where(Media.uploader_id == user_id, *media_date_filters(date_range), Media.status == MediaStatus.READY)
         .group_by(VideoDetection.label)
     )
     video_result = await db.execute(video_query)
@@ -64,7 +66,7 @@ async def get_trash_composition(
         label_counts[str(row[0])] += int(row[1])
 
     # Sort by count descending
-    sorted_items = sorted(label_counts.items(), key=lambda x: x[1], reverse=True)
+    sorted_items = sorted(label_counts.items(), key=lambda x: (-x[1], x[0]))
     total = sum(count for _, count in sorted_items)
 
     return [

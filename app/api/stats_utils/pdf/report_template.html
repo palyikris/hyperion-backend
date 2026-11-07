@@ -233,7 +233,7 @@
     <div class="meta-strip">
         <div class="meta-item">Jelent&eacute;s ID: {{ generated_at }}</div>
         <span style="margin: 0 1rem;"></span>
-        <div class="meta-item">Időbeli trend: {{ days_window }} nap</div>
+        <div class="meta-item">{% if start_date and end_date %}Jelentési időszak: {{ start_date }} - {{ end_date }} (UTC){% else %}Időbeli trend: {{ days_window }} nap{% endif %}</div>
     </div>
 
     <div class="content">
@@ -253,7 +253,7 @@
                 </td>
             </tr>
         </table>
-        <p>A napi trend a kiválasztott időszakot, a többi mutató a teljes feltöltési előzményt összesíti.</p>
+        <p>{% if start_date and end_date %}Minden mutató a kiválasztott jelentési időszakban feltöltött médiákra vonatkozik (UTC).{% else %}A napi trend a kiválasztott időszakot, a többi mutató a teljes feltöltési előzményt összesíti.{% endif %}</p>
         <p>Magas konfidenciájú helyadatok: {{ high_confidence_media_count }}</p>
 
         <div class="section-header">

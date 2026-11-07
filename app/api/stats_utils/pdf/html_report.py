@@ -3,7 +3,7 @@ HTML-based PDF report generator using Jinja2 templates and xhtml2pdf.
 """
 
 from io import BytesIO
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 import asyncio
 import base64
@@ -99,9 +99,13 @@ def _prepare_template_data(stats_data: dict[str, Any], language: str) -> dict:
 
     return {
         "language": language,
+        "start_date": stats_data.get("start_date"),
+        "end_date": stats_data.get("end_date"),
+        "fleet": fleet_data,
+        "processing": processing_data,
         "font_regular_src": os.path.join(TEMPLATE_DIR, "fonts", "LiberationSans-Regular.ttf"),
         "font_bold_src": os.path.join(TEMPLATE_DIR, "fonts", "LiberationSans-Bold.ttf"),
-        "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
         "days_window": days_window,
         "logo_src": _get_logo_src(),
         "trash_composition_items": trash_items,

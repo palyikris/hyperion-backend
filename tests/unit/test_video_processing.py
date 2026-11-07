@@ -176,7 +176,11 @@ def assert_cleaned(video):
     assert not Path(f"{video.local_video}.srt").exists()
     assert not list(video.local_video.parent.glob("hyperion-video-frames-*"))
     assert not list(video.local_video.parent.rglob("*.jpg"))
-    video.delete.assert_called_once_with("media/user/video.mp4")
+    if video.media.status == MediaStatus.READY:
+        video.delete.assert_called_once_with("media/user/video.mp4")
+    else:
+        video.delete.assert_not_called()
+        assert video.media.technical_metadata["hf_full_video_path"] == "media/user/video.mp4"
     assert video.session.open_sessions == 0
 
 

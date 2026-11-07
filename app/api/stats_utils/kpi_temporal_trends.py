@@ -6,15 +6,17 @@ This helps users visualize trends and identify peak periods of environmental imp
 """
 
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.api.stats_utils.report_dates import ReportDateRange, get_report_temporal_trends
 from sqlalchemy import select, func
 from datetime import datetime, timezone, timedelta
 
 from app.models.db.Media import Media
 from app.models.stats import TemporalTrend
+from app.models.upload.MediaStatus import MediaStatus
 
 
 async def get_temporal_trends(
-    db: AsyncSession, user_id: str, days: int
+    db: AsyncSession, user_id: str, days: int, date_range: ReportDateRange | None = None
 ) -> list[TemporalTrend]:
     """
     Tracks the number of trash reports generated per day over a time window.
@@ -39,10 +41,15 @@ async def get_temporal_trends(
     Returns:
         List of TemporalTrend objects, one per day in the window (including zero-days)
     """
-    # Calculate the cutoff date (start of our time window)
-    cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
+    if date_range is not None:
+        return await get_report_temporal_trends(db, user_id, date_range)
 
-    day_bucket = func.date_trunc("day", Media.created_at)
+    # Calculate the cutoff date (start of our time window)
+    now = datetime.now(timezone.utc)
+    cutoff_date = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=days - 1)
+
+    # Bucket in UTC regardless of the database connection's TimeZone setting.
+    day_bucket = func.date_trunc("day", func.timezone("UTC", Media.created_at))
 
     query = (
         select(
@@ -53,7 +60,9 @@ async def get_temporal_trends(
         .where(
             Media.uploader_id == user_id,
             Media.has_trash == True,  # Only count media containing detected trash
+            Media.status == MediaStatus.READY,
             Media.created_at >= cutoff_date,
+            Media.created_at <= now,
         )
         .group_by(day_bucket)
         .order_by(day_bucket)
@@ -68,8 +77,8 @@ async def get_temporal_trends(
     # Fill in zero-days for continuous chart rendering
     # Start from (days-1) ago to include 'days' total days ending today
     trends = []
-    current_date = (datetime.now(timezone.utc) - timedelta(days=days - 1)).date()
-    end_date = datetime.now(timezone.utc).date()
+    current_date = cutoff_date.date()
+    end_date = now.date()
 
     while current_date <= end_date:
         count_val = data_by_date.get(current_date, 0)  # Default to 0 if no data

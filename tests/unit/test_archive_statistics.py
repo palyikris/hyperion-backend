@@ -12,6 +12,7 @@ from sqlalchemy import (
 
 from app.api import map as map_api, stats, vault
 from app.api.stats_utils import cache
+from app.api.stats_utils.report_dates import ReportDateRange
 from app.api.stats_utils.kpi_hotspot_density import get_hotspot_density
 from app.api.stats_utils.kpi_processing_time import get_mean_time_to_process
 from app.models.db.Media import Media, MediaType
@@ -97,12 +98,15 @@ def archive_db():
         Column("initial_metadata", JSON), Column("created_at", DateTime),
         Column("location", String), Column("has_trash", Boolean),
         Column("confidence", Float),
+        Column("media_type", Enum(MediaType)),
     )
     video_table = Table(
         "video_detections", metadata, Column("id", Uuid, primary_key=True),
         Column("media_id", Uuid), Column("created_at", DateTime),
         Column("location", String), Column("confidence", Float),
     )
+    Table("detections", metadata, Column("id", Uuid, primary_key=True),
+          Column("media_id", Uuid), Column("confidence", Float))
     metadata.create_all(engine)
     media = [media_record(1, "zeta.jpg"),
              media_record(2, "alpha.jpg", MediaStatus.PENDING),
@@ -221,11 +225,10 @@ async def test_hotspot_video_threshold_is_normalized():
 
     async def execute(statement):
         statements.append(statement)
-        return Result(0)
+        return SimpleNamespace(one=lambda: SimpleNamespace(hotspot_count=0, media_count=0))
 
     await get_hotspot_density(SimpleNamespace(execute=execute), USER.id)
-    assert 0.8 in statements[1].compile().params.values()
-    assert 0.8 in statements[2].compile().params.values()
+    assert list(statements[0].compile().params.values()).count(0.8) >= 2
 
 
 @pytest.mark.asyncio
@@ -241,7 +244,7 @@ async def test_statistics_endpoints_never_share_session_concurrently(monkeypatch
              "get_temporal_trends", "get_mean_time_to_process", "get_hotspot_density"]
 
     def query(index):
-        async def run(*args):
+        async def run(*args, **kwargs):
             nonlocal busy
             assert not busy, "Concurrent queries on the request session"
             busy = True
@@ -261,8 +264,8 @@ async def test_statistics_endpoints_never_share_session_concurrently(monkeypatch
         from io import BytesIO
         renderer = AsyncMock(return_value=BytesIO(b"pdf"))
         monkeypatch.setattr(stats, "create_pdf_report", renderer)
-        await stats.get_statistics_pdf_report(days=30, language="hu", db=object(), current_user=USER)
-        assert len(renderer.call_args.args[0]) == 7
+        await stats.get_statistics_pdf_report(date_range=ReportDateRange(NOW.date(), (NOW + timedelta(days=29)).date()), language="hu", db=object(), current_user=USER)
+        assert {"trash_composition", "environmental_footprint", "ai_fleet_efficiency", "temporal_trends", "mean_time_to_process", "hotspot_density", "days_window"} <= renderer.call_args.args[0].keys()
     assert events == list(range(6))
 
 
@@ -271,7 +274,8 @@ async def test_processing_time_ends_at_first_ready_not_later_validation():
     engine = create_engine("sqlite://")
     metadata = MetaData()
     media = Table("media", metadata, Column("id", Uuid, primary_key=True),
-                  Column("uploader_id", String), Column("status", Enum(MediaStatus)))
+                  Column("uploader_id", String), Column("status", Enum(MediaStatus)),
+                  Column("assigned_worker", String), Column("created_at", DateTime))
     logs = Table("media_task_logs", metadata, Column("media_id", Uuid),
                  Column("worker_name", String), Column("action", String),
                  Column("message", String), Column("timestamp", DateTime))
@@ -280,9 +284,9 @@ async def test_processing_time_ends_at_first_ready_not_later_validation():
     try:
         with engine.begin() as connection:
             connection.execute(insert(media), [
-                {"id": own_id, "uploader_id": USER.id, "status": MediaStatus.READY},
-                {"id": other_id, "uploader_id": "other", "status": MediaStatus.READY},
-                {"id": incomplete_id, "uploader_id": USER.id, "status": MediaStatus.READY},
+                {"id": own_id, "uploader_id": USER.id, "status": MediaStatus.READY, "assigned_worker": "Helios", "created_at": NOW},
+                {"id": other_id, "uploader_id": "other", "status": MediaStatus.READY, "assigned_worker": "Helios", "created_at": NOW},
+                {"id": incomplete_id, "uploader_id": USER.id, "status": MediaStatus.READY, "assigned_worker": "Helios", "created_at": NOW},
             ])
             rows = []
             for worker, status, seconds in [(None, "PENDING", 0), ("Helios", "EXTRACTING", 2),
@@ -300,16 +304,20 @@ async def test_processing_time_ends_at_first_ready_not_later_validation():
                 async def execute(self, statement):
                     # Execute the real interval subquery; SQLite cannot subtract
                     # timestamps like PostgreSQL, so aggregate seconds in Python.
-                    intervals = connection.execute(select(statement.get_final_froms()[0])).all()
+                    durations = statement.get_final_froms()[0].element
+                    completion = durations.get_final_froms()[0].right.c.completed_at
+                    intervals = connection.execute(durations.with_only_columns(
+                        Media.assigned_worker, Media.created_at, completion,
+                    )).all()
                     assert len(intervals) == 1
-                    duration = (intervals[0].end_time - intervals[0].start_time).total_seconds()
-                    if "worker_name" in intervals[0]._mapping:
+                    duration = (intervals[0].completed_at - intervals[0].created_at).total_seconds()
+                    if "worker_name" in statement.selected_columns:
                         return Result([SimpleNamespace(worker_name="Helios", avg_seconds=duration, task_count=1)])
                     return Result(duration)
 
             result = await get_mean_time_to_process(Session(), USER.id)
             assert result.overall_avg_seconds == 10
-            assert result.by_worker[0].avg_processing_seconds == 8
+            assert result.by_worker[0].avg_processing_seconds == 10
     finally:
         engine.dispose()
 
