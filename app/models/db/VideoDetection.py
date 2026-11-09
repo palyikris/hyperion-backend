@@ -3,10 +3,10 @@ from sqlalchemy import String, ForeignKey, JSON, Float, DateTime, Index, Boolean
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from geoalchemy2 import Geometry, WKBElement
 from datetime import datetime, timezone
-from app.database import Base
+from app.database import Base, SoftDeletableDetection
 
 
-class VideoDetection(Base):
+class VideoDetection(SoftDeletableDetection, Base):
     __tablename__ = "video_detections"
     __table_args__ = (Index("ix_video_loc_gist", "location", postgresql_using="gist"),)
 

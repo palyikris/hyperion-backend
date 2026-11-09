@@ -76,8 +76,11 @@ class Media(Base):
     worker = relationship("AIWorkerState", backref="current_tasks")
     logs = relationship("MediaLog", backref="media", cascade="all, delete-orphan")
     detections = relationship(
-        "Detection", backref="media", cascade="all, delete-orphan", lazy="selectin"
+        "Detection", backref="media", cascade="all, delete-orphan", lazy="selectin",
+        # Relationship predicates such as .any() must also ignore cleaned rows.
+        primaryjoin="and_(Media.id == Detection.media_id, Detection.deleted_at.is_(None))",
     )
     video_detections = relationship(
-        "VideoDetection", back_populates="media", cascade="all, delete-orphan"
+        "VideoDetection", back_populates="media", cascade="all, delete-orphan",
+        primaryjoin="and_(Media.id == VideoDetection.media_id, VideoDetection.deleted_at.is_(None))",
     )

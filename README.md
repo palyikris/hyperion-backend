@@ -62,6 +62,16 @@ FastAPI backend for the Hyperion platform, providing user authentication, dashbo
 - `GET /api/lab/image/{media_id}` – Retrieve image data and current detections for validation.
 - `GET /api/lab/video/{media_id}` – Retrieve detailed video detection data.
 - `PATCH /api/lab/{media_id}` – Update/validate location, address, and detections.
+- `DELETE /api/lab/{media_id}/detections/{detection_id}` – Mark one detection clean.
+- `DELETE /api/lab/{media_id}/detections` – Mark all detections of a media item clean, including every video frame.
+
+Marking clean retains detections with a UTC `deleted_at` timestamp. Normal database
+reads, relationship predicates, statistics, maps, exports, and media listings exclude
+these rows. The media summary is recalculated from active detections; clearing the
+last detection sets `has_trash` to false, confidence to zero, and the detection count
+to zero. Apply the soft-deletion migration with `alembic upgrade head` before running
+the updated API. Clean actions are scoped to the authenticated owner and refresh
+the owner's cached statistics and maps.
 
 ### Dashboard & System
 - `GET /api/health` – System health check and database latency.

@@ -99,7 +99,8 @@ class LabSession:
     async def flush(self):
         self.events.append("flush")
         self.video_detections = [
-            item for item in self.video_detections if item not in self.deleted
+            item for item in self.video_detections
+            if item not in self.deleted and item.deleted_at is None
         ]
         self.video_detections.extend(self.pending)
         self.pending.clear()
@@ -182,8 +183,10 @@ def test_unrelated_detection_id_does_not_read_another_medias_area():
     lab._merge_image_detections(media, [DetectionInput.model_validate(
         input_detection("Metal", id=str(uuid.uuid4()), bbox={**BBOX, "w": 0.25})
     )])
-    assert len(media.detections) == 1
-    assert media.detections[0].area_sqm is None
+    active = [d for d in media.detections if d.deleted_at is None]
+    assert len(active) == 1
+    assert active[0].area_sqm is None
+    assert original.deleted_at is not None
 
 
 def application(db):
@@ -315,7 +318,8 @@ async def test_video_replacement_matching_sibling_preserves_selected_id(geometry
     assert response.status_code == 200, response.text
     assert response.json()["id"] == str(selected.id)
     assert db.video_detections == [selected]
-    assert db.deleted == [sibling]
+    assert db.deleted == []
+    assert sibling.deleted_at is not None
     assert selected.bbox == bbox
     assert selected.area_sqm == (None if geometry_changed else 8.0)
     assert selected.confidence == 1.0

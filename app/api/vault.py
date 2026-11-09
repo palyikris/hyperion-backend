@@ -254,7 +254,10 @@ async def delete_media(
     logger.info(f"Delete single media query: {query}")
     result = await db.execute(query)
     media = result.scalar_one_or_none()
-    video_detections_query = select(VideoDetection).where(VideoDetection.media_id == id)
+    video_detections_query = (
+        select(VideoDetection).where(VideoDetection.media_id == id)
+        .execution_options(include_cleaned_detections=True)
+    )
     logger.info(f"Delete single media video detections query: {video_detections_query}")
     video_detections_result = await db.execute(video_detections_query)
     video_detections = video_detections_result.scalars().all()
