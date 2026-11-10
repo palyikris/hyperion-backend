@@ -122,33 +122,6 @@ async def process_video_media(media_task) -> None:
             media = media_result.scalar_one_or_none()
             if media is None:
                 return
-            filename = (media.initial_metadata or {}).get("filename")
-            if filename:
-                duplicate_result = await session.execute(
-                    select(Media)
-                    .where(
-                        Media.uploader_id == user_id,
-                        Media.id != media_id,
-                        Media.status == MediaStatus.READY,
-                        Media.initial_metadata["filename"].as_string() == str(filename),
-                    )
-                    .limit(1)
-                )
-                duplicate = duplicate_result.scalars().first()
-                if duplicate:
-                    media.status = MediaStatus.FAILED
-                    media.failed_reason = f"Duplicate of {filename}"
-                    media.original_media_id = duplicate.id
-                    session.add(create_status_change_log(
-                        media.id, MediaStatus.FAILED, detail="Duplicate detected"
-                    ))
-                    await session.commit()
-                    delete_source_video = True
-                    await manager.send_status(
-                        user_id, str(media_id), "FAILED",
-                        failed_reason="Duplicate video detected.",
-                    )
-                    return
             media.status = MediaStatus.PROCESSING
             session.add(create_status_change_log(media.id, MediaStatus.PROCESSING))
             await session.commit()

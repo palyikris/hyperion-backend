@@ -55,7 +55,6 @@ class MediaResponse(BaseModel):
     has_trash: bool
     confidence: float
     failed_reason: Optional[str] = None
-    original_media_id: Optional[str] = None
     detections: List[DetectionResponse]
 
 

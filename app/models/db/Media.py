@@ -67,6 +67,7 @@ class Media(Base):
     has_trash: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     failed_reason: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Historical upload links retained for safe deletion; new uploads do not set this.
     original_media_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("media.id"), nullable=True
     )

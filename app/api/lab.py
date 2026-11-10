@@ -56,9 +56,6 @@ def _serialize_media(media: Media) -> dict:
         "has_trash": media.has_trash,
         "confidence": media.confidence,
         "failed_reason": media.failed_reason,
-        "original_media_id": (
-            str(media.original_media_id) if media.original_media_id else None
-        ),
         "detections": [
             _serialize_detection(detection) for detection in media.detections
             if detection.deleted_at is None

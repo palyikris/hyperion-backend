@@ -19,7 +19,6 @@ from app.models.upload.MediaStatus import MediaStatus
 from app.api.upload_utils.conn_manager import manager
 from PIL import Image, UnidentifiedImageError
 import io
-import hashlib
 import uuid
 import asyncio
 import logging
@@ -274,7 +273,6 @@ async def batch_upload(
                 except asyncio.CancelledError:
                     await asyncio.gather(processing, return_exceptions=True)
                     raise
-                content_hash = hashlib.sha256(content).hexdigest()
             except UnidentifiedImageError as error:
                 raise HTTPException(
                     status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
@@ -298,7 +296,6 @@ async def batch_upload(
                     "size": os.path.getsize(content_path),
                     "width": width,
                     "height": height,
-                    "sha256": content_hash,
                 },
             )
 

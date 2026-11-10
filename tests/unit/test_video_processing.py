@@ -113,7 +113,7 @@ def detection(**extra):
 def video(monkeypatch, tmp_path):
     media = SimpleNamespace(
         id=uuid.uuid4(), uploader_id="user", assigned_worker="Helios",
-        status=MediaStatus.EXTRACTING, initial_metadata={},
+        status=MediaStatus.EXTRACTING, initial_metadata={"filename": "video.mp4"},
         technical_metadata={"hf_full_video_path": "media/user/video.mp4"},
         has_trash=False, confidence=0, failed_reason=None,
     )
@@ -210,6 +210,21 @@ async def test_minimal_ai_response_uses_local_time_gps_and_frame_dimensions(vide
     index = video.session.events.index(("count", "Helios"))
     assert video.session.events[index + 1] == ("commit", MediaStatus.READY)
     assert_cleaned(video)
+
+
+@pytest.mark.asyncio
+async def test_videos_with_matching_filenames_are_both_processed(video):
+    first = video.media
+    second = SimpleNamespace(**{**vars(first), "id": uuid.uuid4()})
+    await vp.process_video_media(first)
+
+    video.local_video.write_bytes(b"mock video")
+    video.session.media = second
+    await vp.process_video_media(second)
+
+    assert first.status == second.status == MediaStatus.READY
+    assert {item.media_id for item in video.session.saved} == {first.id, second.id}
+    assert video.count.await_count == 2
 
 
 @pytest.mark.asyncio

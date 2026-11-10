@@ -4,7 +4,6 @@ from contextlib import suppress
 from datetime import date
 from sqlalchemy import select, update, or_, func, and_
 from sqlalchemy.sql import text
-from geoalchemy2.functions import ST_DWithin, ST_SetSRID, ST_MakePoint
 from datetime import timedelta
 from app.database import AsyncSessionLocal
 from app.api.medialog_utils.media_log_utils import create_status_change_log
@@ -27,7 +26,6 @@ WORKER_IDLE_WAIT_SECONDS = 60
 WORKER_RATE_LIMIT_BACKOFF_SECONDS = 300
 WORKER_ERROR_RETRY_SECONDS = 10
 EXTRACTION_RETRY_DELAY_SECONDS = 5
-DUPLICATE_DISTANCE_METERS = 10
 logger = logging.getLogger(__name__)
 
 

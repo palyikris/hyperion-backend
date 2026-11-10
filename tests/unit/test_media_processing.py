@@ -52,7 +52,9 @@ def make_media():
         assigned_worker="Helios",
         status=MediaStatus.EXTRACTING,
         hf_path="media/image.jpg",
-        initial_metadata={},
+        initial_metadata={"filename": "photo.jpg"},
+        lat=47.0,
+        lng=19.0,
         technical_metadata={"hf_full_video_path": "media/video.mp4"},
         has_trash=False,
         confidence=0,
@@ -66,11 +68,6 @@ async def test_successful_image_counts_in_ready_transaction(monkeypatch):
     monkeypatch.setattr(image_processor, "AsyncSessionLocal", lambda: session)
     monkeypatch.setattr(
         image_processor, "extract_metadata_from_hf", AsyncMock(return_value={})
-    )
-    monkeypatch.setattr(
-        image_processor,
-        "detect_duplicate",
-        AsyncMock(return_value=(False, None, None)),
     )
     monkeypatch.setattr(image_processor, "is_image_media", lambda _: True)
     monkeypatch.setattr(
@@ -94,17 +91,33 @@ async def test_successful_image_counts_in_ready_transaction(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_images_with_matching_filenames_and_gps_are_both_processed(monkeypatch):
+    images = [make_media(), make_media()]
+    session = MediaSession(images[0])
+    monkeypatch.setattr(image_processor, "AsyncSessionLocal", lambda: session)
+    monkeypatch.setattr(image_processor, "extract_metadata_from_hf", AsyncMock(return_value={}))
+    monkeypatch.setattr(image_processor, "is_image_media", lambda _: True)
+    inference = AsyncMock(return_value=[])
+    monkeypatch.setattr(image_processor, "get_real_detections", inference)
+    monkeypatch.setattr(image_processor, "record_completed_task", AsyncMock())
+    monkeypatch.setattr(image_processor.manager, "send_status", AsyncMock())
+
+    for image in images:
+        session.media = image
+        assert await image_processor.process_image_media(image, "Helios", "user-1")
+
+    assert images[0].id != images[1].id
+    assert all(image.status == MediaStatus.READY for image in images)
+    assert inference.await_count == 2
+
+
+@pytest.mark.asyncio
 async def test_failed_image_inference_does_not_count_or_mark_ready(monkeypatch):
     media = make_media()
     session = MediaSession(media)
     monkeypatch.setattr(image_processor, "AsyncSessionLocal", lambda: session)
     monkeypatch.setattr(
         image_processor, "extract_metadata_from_hf", AsyncMock(return_value={})
-    )
-    monkeypatch.setattr(
-        image_processor,
-        "detect_duplicate",
-        AsyncMock(return_value=(False, None, None)),
     )
     monkeypatch.setattr(image_processor, "is_image_media", lambda _: True)
     monkeypatch.setattr(

@@ -75,7 +75,6 @@ def pipeline(monkeypatch, tmp_path):
     status = AsyncMock()
     monkeypatch.setattr(image_processor.manager, "send_status", status)
     monkeypatch.setattr(image_processor, "extract_metadata_from_hf", AsyncMock(return_value={"make": "test"}))
-    monkeypatch.setattr(image_processor, "detect_duplicate", AsyncMock(return_value=(False, None, None)))
 
     source = tmp_path / "video.mp4"
     source.write_bytes(b"video")

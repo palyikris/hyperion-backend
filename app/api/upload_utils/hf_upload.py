@@ -1,7 +1,7 @@
 import os
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import update, select, or_, and_
+from sqlalchemy import update, select
 from huggingface_hub import HfApi, CommitOperationAdd
 from app.database import AsyncSessionLocal
 from app.api.medialog_utils.media_log_utils import create_status_change_log
@@ -18,17 +18,17 @@ HF_REPO_ID = os.getenv("HF_REPO_ID")
 async def delete_from_hf(hf_path: str, media_id: uuid.UUID) -> bool:
     """
     Delete a file from the Hugging Face dataset.
-    Only deletes if no other non-failed media reference this path (i.e., it's not a duplicate).
+    Preserve stored files still referenced by other non-failed media.
 
     Args:
         hf_path: The path of the file in the HF repo (e.g., media/user_id/date/filename)
         media_id: The ID of the media being deleted
 
     Returns:
-        True if deletion succeeded or was skipped (duplicate), False on error
+        True if deletion succeeded or the file is still in use, False on error
     """
     try:
-        # Check if other media reference this path (e.g., duplicates)
+        # Historical media can share storage paths; preserve files still in use.
         async with AsyncSessionLocal() as session:
             other_refs = await session.execute(
                 select(Media).where(
@@ -77,7 +77,7 @@ async def delete_from_hf(hf_path: str, media_id: uuid.UUID) -> bool:
 
 
 async def process_hf_upload(files_data: list[tuple], user_id: str):
-    # Always release staged files, including duplicate-only batches and setup failures.
+    # Always release staged files, including empty batches and setup failures.
     try:
         await _process_hf_upload(files_data, user_id)
     except Exception as error:
@@ -107,7 +107,6 @@ async def process_hf_upload(files_data: list[tuple], user_id: str):
 async def _process_hf_upload(files_data: list[tuple], user_id: str):
     """
     Process and upload files to Hugging Face.
-    Checks for duplicates before uploading to avoid wasted storage.
 
     Args:
         files_data: List of tuples containing (media_id, filename, content_temp_path, thumbnail_temp_path)
@@ -121,7 +120,6 @@ async def _process_hf_upload(files_data: list[tuple], user_id: str):
 
     operations = []
     media_ids = []
-    duplicate_updates = []
 
     async with AsyncSessionLocal() as session:
         for m_id, filename, content_path, thumbnail_path in files_data:
@@ -129,86 +127,21 @@ async def _process_hf_upload(files_data: list[tuple], user_id: str):
             current_task = media.scalar_one_or_none()
             if not current_task:
                 continue
-            content_hash = (current_task.initial_metadata or {}).get("sha256")
-            # A filename is not evidence of duplicate content. Only compare earlier
-            # records so identical images in one batch cannot reject each other.
-            duplicate_query = (
-                select(Media)
-                .where(
-                    Media.id != m_id,
-                    Media.status != MediaStatus.FAILED,
-                    Media.initial_metadata["sha256"].as_string() == content_hash,
-                    or_(
-                        Media.created_at < current_task.created_at,
-                        and_(Media.created_at == current_task.created_at, Media.id < m_id),
-                    ),
-                    Media.uploader_id == user_id,
+            full_path = f"media/{user_id}/{date_str}/{m_id}_{filename}"
+            thumb_path = f"media/{user_id}/{date_str}/{m_id}_thumbnail_{filename}"
+
+            operations.append(
+                CommitOperationAdd(
+                    path_in_repo=full_path, path_or_fileobj=content_path
                 )
-                .limit(1)
             )
-            duplicate = None
-            if content_hash:
-                dup_result = await session.execute(duplicate_query)
-                duplicate = dup_result.scalar_one_or_none()
-
-            if duplicate:
-                original_name = (duplicate.initial_metadata or {}).get(
-                    "filename", "Unknown"
+            operations.append(
+                CommitOperationAdd(
+                    path_in_repo=thumb_path, path_or_fileobj=thumbnail_path
                 )
-                original_date = duplicate.created_at.strftime("%Y-%m-%d %H:%M")
-                duplicate_reason = f"Image is a duplicate of image {original_name[0:5]}... uploaded at {original_date}"
+            )
+            media_ids.append((m_id, thumb_path))
 
-                if current_task:
-                    current_task.status = MediaStatus.FAILED
-                    current_task.failed_reason = duplicate_reason
-                    current_task.original_media_id = duplicate.id
-                    current_task.hf_path = duplicate.hf_path
-
-                    # copy data from original
-                    if duplicate.lat is not None and duplicate.lng is not None:
-                        current_task.lat = duplicate.lat
-                        current_task.lng = duplicate.lng
-                        current_task.location = duplicate.location
-                        current_task.altitude = duplicate.altitude
-                        current_task.address = duplicate.address
-
-                    current_task.has_trash = duplicate.has_trash
-                    current_task.confidence = duplicate.confidence
-                    current_task.technical_metadata = duplicate.technical_metadata
-
-                    session.add(
-                        create_status_change_log(
-                            m_id,
-                            MediaStatus.FAILED,
-                            detail=f"Duplicate detected: {original_name[0:5]}... (uploaded {original_date}). Using original image data.",
-                        )
-                    )
-
-                    duplicate_updates.append((m_id, duplicate_reason))
-            else:
-                full_path = f"media/{user_id}/{date_str}/{m_id}_{filename}"
-                thumb_path = f"media/{user_id}/{date_str}/{m_id}_thumbnail_{filename}"
-
-                operations.append(
-                    CommitOperationAdd(
-                        path_in_repo=full_path, path_or_fileobj=content_path
-                    )
-                )
-                operations.append(
-                    CommitOperationAdd(
-                        path_in_repo=thumb_path, path_or_fileobj=thumbnail_path
-                    )
-                )
-                media_ids.append((m_id, thumb_path))
-
-        await session.commit()
-
-    for m_id, duplicate_reason in duplicate_updates:
-        await manager.send_status(
-            user_id, str(m_id), "FAILED", failed_reason=duplicate_reason
-        )
-
-    # upload only non-duplicate files to HF
     if operations:
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(

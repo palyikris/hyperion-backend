@@ -2,14 +2,12 @@ from app.api.dashboard_utils.utils.media_utils import (
     add_status_log,
     fail_media,
     build_metadata_update,
-    detect_duplicate,
     is_image_media,
 )
 from app.api.upload_utils.conn_manager import manager
 from app.models.db.Media import Media
 from app.models.db.Detection import Detection
 from app.models.upload.MediaStatus import MediaStatus
-from app.models.db.AIWorker import AIWorkerState
 from app.database import AsyncSessionLocal
 from sqlalchemy import update, select
 from .hf_metadata import extract_metadata_from_hf
@@ -17,7 +15,6 @@ import logging
 from app.api.ai_client import get_real_detections
 from .worker_state import record_completed_task
 
-DUPLICATE_DISTANCE_METERS = 10
 logger = logging.getLogger(__name__)
 
 async def process_image_media(media_task, name, uploader_id):
@@ -54,50 +51,6 @@ async def process_image_media(media_task, name, uploader_id):
                 f"Extraction failed: {e}",
             )
         return False
-
-    # second duplicate guard: only runs after EXIF/GPS extraction so can
-    # reject spatial duplicates that passed the filename-only upload check.
-
-    async with AsyncSessionLocal() as session:
-        res = await session.execute(select(Media).where(Media.id == media_task_id))
-        current_task = res.scalar_one_or_none()
-        duplicate_found, duplicate, duplicate_reason = await detect_duplicate(
-            session, media_task_id, uploader_id, current_task, DUPLICATE_DISTANCE_METERS
-        )
-        if duplicate_found:
-
-            if not current_task:
-                print(
-                    f"Duplicate detected for media {media_task_id} but current task not found in DB. This should not happen."
-                )
-                return False
-
-            if not duplicate:
-                print(
-                    f"Duplicate detected for media {media_task_id} but duplicate record not found in DB. This should not happen."
-                )
-                return False
-
-            current_task.status = MediaStatus.FAILED
-            current_task.failed_reason = duplicate_reason
-            current_task.original_media_id = duplicate.id
-            add_status_log(
-                session, media_task_id, MediaStatus.FAILED, name, "Duplicate detected"
-            )
-            await session.execute(
-                update(AIWorkerState)
-                .where(AIWorkerState.name == name)
-                .values(status="Active")
-            )
-            await session.commit()
-            await manager.send_status(
-                user_id=str(uploader_id),
-                media_id=str(media_task_id),
-                status=MediaStatus.FAILED.value,
-                worker=name,
-                failed_reason=duplicate_reason,
-            )
-            return False
 
     await manager.send_status(
         user_id=str(uploader_id),

@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi import status
 from PIL import Image
 import io
-from datetime import datetime, timezone
 
 from app.api.upload import MAX_VIDEO_FILE_SIZE_BYTES
 from app.api.upload_utils.hf_upload import process_hf_upload, process_video_hf_upload
@@ -265,26 +264,6 @@ class _FakeScalarResult:
         return self.value
 
 
-class _FakeDuplicateSession:
-    def __init__(self, duplicate, current):
-        self.results = iter([duplicate, current])
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, exc_type, exc, traceback):
-        return False
-
-    async def execute(self, _query):
-        return _FakeScalarResult(next(self.results))
-
-    def add(self, _value):
-        return None
-
-    async def commit(self):
-        return None
-
-
 class _FakeVideoUploadSession:
     def __init__(self, media):
         self.media = media
@@ -311,25 +290,14 @@ class _InlineExecutorLoop:
 
 
 @pytest.mark.asyncio
-async def test_duplicate_only_batch_always_cleans_temp_files(tmp_path):
+async def test_image_storage_upload_always_cleans_temp_files(tmp_path):
     content_path = tmp_path / "content"
     thumbnail_path = tmp_path / "thumbnail"
     content_path.write_bytes(b"content")
     thumbnail_path.write_bytes(b"thumbnail")
 
-    duplicate = SimpleNamespace(
-        id=uuid.uuid4(),
-        initial_metadata={"filename": "duplicate.jpg"},
-        created_at=datetime.now(timezone.utc),
-        hf_path="media/original.jpg",
-        lat=None,
-        lng=None,
-        has_trash=False,
-        confidence=0.0,
-        technical_metadata=None,
-    )
-    current = SimpleNamespace()
-    fake_session = _FakeDuplicateSession(duplicate, current)
+    media_id = uuid.uuid4()
+    fake_session = _FakeVideoUploadSession(SimpleNamespace(id=media_id))
 
     with patch(
         "app.api.upload_utils.hf_upload.AsyncSessionLocal",
@@ -345,8 +313,8 @@ async def test_duplicate_only_batch_always_cleans_temp_files(tmp_path):
         await process_hf_upload(
             [
                 (
-                    uuid.uuid4(),
-                    "duplicate.jpg",
+                    media_id,
+                    "photo.jpg",
                     str(content_path),
                     str(thumbnail_path),
                 )

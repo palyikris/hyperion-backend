@@ -26,6 +26,7 @@ FastAPI backend for the Hyperion platform, providing user authentication, dashbo
 
 ### Media & Video Support
 - **Hybrid Media Processing**: Dedicated support for both `IMAGE` and `VIDEO` media types.
+- **Independent Uploads**: Every image or video upload is stored and processed separately, including repeated files, filenames, and GPS locations.
 - **Video Analytics**: Specialized `VideoDetection` models to store object timestamps and specific frame paths within videos.
 - **Automated Cleanup**: A background task automatically prunes temporary video processing directories every 24 hours.
 - **HuggingFace Integration**: Seamless, asynchronous upload of media to HuggingFace Hub datasets.

@@ -1,4 +1,4 @@
-from sqlalchemy import select, update, func
+from sqlalchemy import update, func
 from app.api.medialog_utils.media_log_utils import create_status_change_log
 from app.models.db.AIWorker import AIWorkerState
 from app.models.upload.MediaStatus import MediaStatus
@@ -59,40 +59,6 @@ def build_metadata_update(technical_meta):
     return update_values
 
 
-async def detect_duplicate(
-    session, media_task_id, uploader_id, current_task, duplicate_distance_meters
-):
-    if current_task and current_task.lat is not None and current_task.lng is not None:
-        current_location = func.ST_SetSRID(
-            func.ST_MakePoint(current_task.lng, current_task.lat), 4326
-        )
-        duplicate_query = (
-            select(Media)
-            .where(
-                Media.id != media_task_id,
-                Media.status != MediaStatus.FAILED,
-                Media.location.isnot(None),
-                Media.initial_metadata["filename"].as_string()
-                == (current_task.initial_metadata or {}).get("filename", ""),
-                func.ST_DWithin(
-                    func.Geography(Media.location),
-                    func.Geography(current_location),
-                    duplicate_distance_meters,
-                ),
-                Media.uploader_id == uploader_id,
-            )
-            .limit(1)
-        )
-        dup_result = await session.execute(duplicate_query)
-        duplicate = dup_result.scalar_one_or_none()
-        if duplicate:
-            original_name = (duplicate.initial_metadata or {}).get(
-                "filename", "Unknown"
-            )
-            original_date = duplicate.created_at.strftime("%Y-%m-%d %H:%M")
-            duplicate_reason = f"Image is a duplicate of image {original_name[0:5]}... uploaded at {original_date}"
-            return True, duplicate, duplicate_reason
-    return False, None, None
 from app.models.db.Media import Media
 from app.models.db.Detection import Detection
 import random
