@@ -104,9 +104,11 @@ def archive_db():
         "video_detections", metadata, Column("id", Uuid, primary_key=True),
         Column("media_id", Uuid), Column("created_at", DateTime),
         Column("location", String), Column("confidence", Float),
+        Column("deleted_at", DateTime(timezone=True), nullable=True),
     )
     Table("detections", metadata, Column("id", Uuid, primary_key=True),
-          Column("media_id", Uuid), Column("confidence", Float))
+          Column("media_id", Uuid), Column("confidence", Float),
+          Column("deleted_at", DateTime(timezone=True), nullable=True))
     metadata.create_all(engine)
     media = [media_record(1, "zeta.jpg"),
              media_record(2, "alpha.jpg", MediaStatus.PENDING),
