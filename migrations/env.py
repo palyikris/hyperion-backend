@@ -95,6 +95,7 @@ def do_run_migrations(connection):
         connection=connection,
         target_metadata=target_metadata,
         include_object=include_object,
+        version_table_schema=config.attributes.get("version_table_schema"),
         # It's good practice to keep the dialect_opts for async pg
         dialect_opts={"paramstyle": "named"},
     )

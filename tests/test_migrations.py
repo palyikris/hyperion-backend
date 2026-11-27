@@ -8,7 +8,7 @@ from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.migration import MigrationContext
 import pytest
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 
 from app.api.auth import prune_expired_blacklisted_tokens
 from app.api.medialog_utils.media_log_utils import create_status_change_log
@@ -20,7 +20,10 @@ from app.models.upload.MediaStatus import MediaStatus
 
 
 @pytest.mark.asyncio
-async def test_migrated_schema_matches_models_and_accepts_utc_writes(db_session):
+@pytest.mark.parametrize("session_timezone", ["UTC", "Europe/Budapest"])
+async def test_migrated_schema_matches_models_and_accepts_utc_writes(
+    db_session, session_timezone
+):
     connection = await db_session.connection()
     schema = "migration_test_" + uuid.uuid4().hex
 
@@ -29,8 +32,20 @@ async def test_migrated_schema_matches_models_and_accepts_utc_writes(db_session)
         sync_connection.execute(text(f'SET LOCAL search_path TO "{schema}", public'))
         config = Config(str(Path(__file__).resolve().parents[1] / "alembic.ini"))
         config.attributes["connection"] = sync_connection
+        # CI has already migrated public. Keep this schema's revision history
+        # private so Alembic cannot inherit public.alembic_version and skip it.
+        config.attributes["version_table_schema"] = schema
         command.upgrade(config, "7f3a9d2c6e81")
-        sync_connection.execute(text("SET LOCAL TIME ZONE 'Europe/Budapest'"))
+        columns = inspect(sync_connection).get_columns("token_blacklist", schema=schema)
+        assert all(
+            not column["type"].timezone
+            for column in columns
+            if column["name"] in {"blacklisted_at", "expires_at"}
+        )
+        sync_connection.execute(
+            text("SELECT set_config('TimeZone', :timezone, true)"),
+            {"timezone": session_timezone},
+        )
         sync_connection.execute(text("""
             INSERT INTO token_blacklist (token, user_email, blacklisted_at, expires_at)
             VALUES ('legacy-token', 'legacy@example.test', '2026-01-01 12:00:00', '2030-01-01 12:00:00')
