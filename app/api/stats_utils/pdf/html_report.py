@@ -8,15 +8,38 @@ from typing import Any
 import asyncio
 import base64
 from functools import lru_cache
+from threading import Lock
 from urllib.request import urlopen
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from xhtml2pdf import pisa
+from xhtml2pdf.default import DEFAULT_FONT
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 import os
 
 # Get the directory where this file is located
 TEMPLATE_DIR = os.path.dirname(os.path.abspath(__file__))
 LOGO_URL = "https://hyperion-frontend-blond.vercel.app/logo.png"
+_font_lock = Lock()
+
+
+def _register_report_fonts() -> None:
+    # xhtml2pdf 0.2.16 reopens a locked NamedTemporaryFile for @font-face on
+    # Windows. Register the bundled fonts directly, once, before rendering.
+    with _font_lock:
+        if "HyperionSans" not in pdfmetrics.getRegisteredFontNames():
+            pdfmetrics.registerFont(TTFont(
+                "HyperionSans", os.path.join(TEMPLATE_DIR, "fonts", "LiberationSans-Regular.ttf")
+            ))
+            pdfmetrics.registerFont(TTFont(
+                "HyperionSans-Bold", os.path.join(TEMPLATE_DIR, "fonts", "LiberationSans-Bold.ttf")
+            ))
+            pdfmetrics.registerFontFamily(
+                "HyperionSans", normal="HyperionSans", bold="HyperionSans-Bold",
+                italic="HyperionSans", boldItalic="HyperionSans-Bold",
+            )
+        DEFAULT_FONT["hyperionsans"] = "HyperionSans"
 
 
 @lru_cache(maxsize=1)
@@ -103,8 +126,6 @@ def _prepare_template_data(stats_data: dict[str, Any], language: str) -> dict:
         "end_date": stats_data.get("end_date"),
         "fleet": fleet_data,
         "processing": processing_data,
-        "font_regular_src": os.path.join(TEMPLATE_DIR, "fonts", "LiberationSans-Regular.ttf"),
-        "font_bold_src": os.path.join(TEMPLATE_DIR, "fonts", "LiberationSans-Bold.ttf"),
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
         "days_window": days_window,
         "logo_src": _get_logo_src(),
@@ -144,6 +165,7 @@ def _render_template(data: dict, language: str) -> str:
 
 def _html_to_pdf(html_content: str) -> BytesIO:
     """Convert HTML string to PDF bytes using xhtml2pdf."""
+    _register_report_fonts()
     pdf_bytes = BytesIO()
     
     # Convert HTML string to PDF

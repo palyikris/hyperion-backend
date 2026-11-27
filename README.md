@@ -97,6 +97,10 @@ The application handles several background processes automatically on startup:
    alembic upgrade head
    ```
 
+The latest migration also aligns token revocation and audit timestamps with UTC.
+Apply it before starting this backend version; it preserves existing UTC values
+and prevents startup cleanup, logout, and media log writes from failing.
+
 ## Tests
 
 Run isolated unit tests with `venv/bin/python -m pytest tests/unit -q`.

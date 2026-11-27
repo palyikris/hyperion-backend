@@ -5,6 +5,17 @@ from httpx import AsyncClient
 pytestmark = pytest.mark.asyncio
 
 
+async def test_logout_revokes_the_token_in_the_real_database(auth_client):
+    client = auth_client["client"]
+    token = client.cookies.get("access_token")
+    response = await client.post("/api/auth/logout")
+    assert response.status_code == 200
+    client.cookies.set("access_token", token)
+    response = await client.get("/api/auth/me")
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Token has been revoked"
+
+
 async def test_signup_success(client: AsyncClient):
     """Test that a new user can successfully register."""
     response = await client.post(

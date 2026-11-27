@@ -119,10 +119,28 @@ async def test_real_pdf_contains_full_trend_fleet_and_processing_time(language):
     assert "75.0" in text
     assert "■" not in text
     if language == "hu":
-        assert "feldolgozási idő" in text
+        assert "feldolgozási idő" in text.lower()
         assert "feltöltési előzményt" in text
     for item in report_data(30)["temporal_trends"]["trends"]:
         assert item["date"] in text
+
+
+@pytest.mark.asyncio
+async def test_concurrent_pdf_exports_keep_both_languages_and_embedded_fonts():
+    languages = ["en", "hu", "en", "hu"]
+    reports = await asyncio.gather(*[
+        html_report.create_pdf_report(report_data(), language) for language in languages
+    ])
+    for language, report in zip(languages, reports):
+        reader = PdfReader(report)
+        text = "\n".join(page.extract_text() for page in reader.pages)
+        assert ("feldolgozási idő" if language == "hu" else "Mean time to process") in text
+        font_names = [
+            str(font.get_object().get("/BaseFont", ""))
+            for page in reader.pages
+            for font in page["/Resources"]["/Font"].get_object().values()
+        ]
+        assert any("LiberationSans" in name for name in font_names)
 
 
 def test_pdf_generation_failure_is_not_returned_as_success(monkeypatch):

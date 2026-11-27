@@ -15,5 +15,5 @@ class TokenBlacklist(Base):
     id = Column(Integer, primary_key=True, index=True)
     token = Column(String, unique=True, index=True, nullable=False)
     user_email = Column(String, nullable=False, index=True)
-    blacklisted_at = Column(DateTime, default=utc_now, nullable=False)
-    expires_at = Column(DateTime, nullable=False)  # When the token naturally expires
+    blacklisted_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)  # When the token naturally expires

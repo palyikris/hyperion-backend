@@ -126,6 +126,10 @@ import sys
 
 def run_migrations_online() -> None:
     """Run migrations in 'online' mode."""
+    connection = config.attributes.get("connection")
+    if connection is not None:
+        do_run_migrations(connection)
+        return
 
     # ADD THESE TWO LINES FOR WINDOWS COMPATIBILITY:
     if sys.platform == "win32":

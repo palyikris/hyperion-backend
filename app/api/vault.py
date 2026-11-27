@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc, asc, update, func, literal, union_all
 from sqlalchemy.orm import selectinload
 from typing import Optional
+from uuid import UUID
 
 from app.database import get_db
 from app.api.deps import get_current_user
@@ -241,7 +242,7 @@ async def delete_all_media(
 
 @router.delete("/vault/{id}", status_code=status.HTTP_200_OK)
 async def delete_media(
-    id: str,
+    id: UUID,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):

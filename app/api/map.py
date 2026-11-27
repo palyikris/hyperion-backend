@@ -11,6 +11,7 @@ from geoalchemy2.functions import (
     ST_SnapToGrid,
 )
 from typing import Optional
+from uuid import UUID
 from time import monotonic
 
 from app.database import get_db
@@ -341,7 +342,7 @@ async def get_map_stats(
     response_model=MapLogsResponse,
 )
 async def get_map_item_logs(
-    id: str,
+    id: UUID,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
